@@ -1,0 +1,392 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs} % For better tables
+\usepackage{algorithm} % For algorithm blocks
+\usepackage{url}
+\usepackage{float} % For [H] placement
+
+% Define theorems
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+
+\begin{document}
+
+\title{SF-Detector: An Efficient and Accurate Method for Detecting Steady Flows in Network Traffic}
+
+% Author placeholder - Update with actual author info if needed
+\author{\IEEEauthorblockN{Chen Zhenxing}
+\IEEEauthorblockA{\textit{Changsha University of Science and Technology} \\
+Changsha, China \\
+Email: [1006503012@qq.com]}
+}
+
+\maketitle
+
+\begin{abstract}
+Steady flows refer to packet flows whose packet arrival rates remain relatively steady across multiple consecutive time windows. Such packet flows may indicate network security threats like DDoS attacks, and also reflect sustained network traffic demands useful for resource planning and cache optimization. Previous work requires storing per-flow information across multiple time windows to track flow stability, resulting in high memory overhead and low throughput. To address these issues, we propose an efficient and accurate method for detecting steady flows in network traffic called SF-Detector, which separates the filtering and recording functions of packet flows, enabling efficient detection and reporting of steady flows. In particular, SF-Detector consists of a filtering part that employs multi-window counting Bloom filters to remove non-continuous flows, and a recording part that adopts a hash table to track and verify steady flows. As for the recording part, we design a stability determination method based on the ratio of maximum to minimum arrival frequencies across consecutive time windows. If this ratio stays within a tolerance threshold, the flow is considered steady. This simple comparison avoids complex variance calculations, reducing computational overhead. Additionally, we devise a flow entry replacement mechanism for the record table. When the table is full, the entry with the smallest steady-count is replaced, ensuring efficient memory utilization. Finally, we evaluate SF-Detector through theoretical analysis and experiments on real network traces (CAIDA2020, CAIDA2022, MAWI). Compared to state-of-the-art methods, SF-Detector improves precision by up to 20\%, achieving over 95\% precision, nearly 100\% recall, and 40 MIPS throughput.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Network Measurement, Steady Flows, Sketch Algorithms, Bloom Filter, Traffic Analysis.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Network measurement plays a vital role in the traffic engineering and network security management of large-scale dynamic network traffic \cite{b1}-\cite{b5}. It provides critical information such as traffic volume statistics, flow distributions, and anomaly patterns for applications including network optimization, security monitoring, and resource allocation. These applications demand high measurement accuracy to ensure reliable decision-making. However, it is impractical to store all data due to the high speed and massive scale of modern network traffic, forcing measurement to rely on sampling or approximation techniques rather than exact recording. This makes achieving both high-precision and high-overhead network measurement particularly challenging.
+
+To address this challenge, Sketch-based techniques achieve accurate measurement with low memory consumption through probabilistic algorithms \cite{b6}. Therefore, they are widely applied in network measurement. These techniques have demonstrated excellent performance in tasks such as flow cardinality estimation \cite{b7}, flow frequency estimation \cite{b8}, heavy hitter identification \cite{b9}, quantile estimation \cite{b10}, and entropy estimation \cite{b11}. Besides these traditional measurement tasks, researchers have recently extended Sketch-based techniques to detecting novel flow patterns, including active flows \cite{b12}, periodic flows \cite{b13}, steady flows \cite{b14}, burst flows \cite{b15}, and persistent flows \cite{b16}.
+
+In this paper, steady flows refer to those flows whose arrival rates remain around a fixed value across multiple consecutive time windows \cite{b14}. These flows play significant roles in network traffic analysis, bandwidth management, and cache optimization. Therefore, it is significant to accurately identify steady flows for network performance optimization and rational resource allocation.
+
+To the best of our knowledge, there is little work on the identification of steady flows until now. Among existing efforts, SteadySketch \cite{b14} achieves good precision and recall, but is too slow for high-speed data flows and prone to memory overflow. To address the aforementioned problems, we propose SF-Detector, an efficient and accurate method for detecting steady flows in network traffic.
+
+The main contributions of this paper are summarized as follows:
+\begin{itemize}
+    \item We propose a low-overhead method called SF-Detector that utilizes a hierarchical filtering mechanism to separate non-continuous flow elimination via a triple-counting Bloom filter from steady flow verification using a hash-table-based structure.
+    \item We design a stability determination method based on extreme value differences that evaluates flow stability by comparing maximum and minimum frequencies across consecutive windows with a tolerance parameter to replace high-complexity variance calculations.
+    \item We design a steady-count-based replacement mechanism that addresses memory overflow by prioritizing the eviction of flows with the fewest consecutive steady periods.
+\end{itemize}
+
+\section{Definition of Steady Flow and Related Work}
+
+\subsection{Definition of Steady Flow}
+Suppose there exists a sequential packet flow sequence $S=\{e_{1},e_{2},e_{3},...\}$, which is divided into multiple fixed-size time windows $w_1, w_2, w_3, ...$. For the packet flow $e$, let its arrival frequencies in each time window be $f_{1},f_{2},f_{3},...$. If the flow $e$ satisfies the following condition across consecutive time windows:
+
+\begin{equation}
+    \begin{cases}
+    Steady\_count \ge \Gamma \\[6pt]
+    Max\_val \le (1+\beta) \cdot \dfrac{Max\_val + Min\_val}{2} \\[8pt]
+    Min\_val \ge (1-\beta) \cdot \dfrac{Max\_val + Min\_val}{2}
+    \end{cases}
+    \label{eq:stability}
+\end{equation}
+
+where $\beta$ indicates the fluctuation tolerance threshold for steady flow detection, and $\Gamma$ denotes the number threshold of consecutively stable time windows. Then the flow $e$ is determined as a steady flow. Table \ref{tab:symbols} shows the symbols commonly used in the SF-Detector and their meanings.
+
+\begin{table}[htbp]
+\caption{Commonly Used Symbols in SF-Detector}
+\begin{center}
+\begin{tabular}{cp{6.2cm}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} \\
+\midrule
+$S_{win}$ & the size of each time window, indicated by a fixed number of measured packets \\
+$W_{cur}$ & the sequence number of the current time window \\
+$F_{cur}$ & the frequency of a flow in the current time window \\
+$Max\_val$ & the maximum frequency of a flow across consecutive time windows \\
+$Min\_val$ & the minimum frequency of a flow across consecutive time windows \\
+$Steady\_count$ & the number of consecutive windows satisfying the stability condition \\
+$\beta$ & the fluctuation tolerance threshold for steady flow detection \\
+$\Gamma$ & the number threshold of consecutively stable time windows of a steady flow \\
+$k$ & the number of hash functions in the filter part of SF-Detector \\
+$H_i(\cdot)$ & the $i$-th hash function in the filter part ($1 \le i \le k$) \\
+$w$ & the number of counters in each Counting Bloom Filter of the filter part \\
+$M$ & the number of buckets in the record table of SF-Detector \\
+$n$ & the number of storage units per bucket in the record table \\
+$h(\cdot)$ & the hash function used in the record table of SF-Detector \\
+\bottomrule
+\end{tabular}
+\label{tab:symbols}
+\end{center}
+\end{table}
+
+\subsection{Relevant Work}
+Steady flow detection is a fundamental function of network traffic analysis. Previous frequency estimation methods are mostly designed based on probabilistic data structures, such as Count-Min Sketch \cite{b20} and Count Sketch \cite{b21}. Count-Min Sketch is composed of a $d \times w$ two-dimensional array and $d$ mutually independent hash functions. When a packet arrives, it maps the packet into $d$ counters by hashing and increments them by 1. As for the query of a flow, the minimum of its mapped counters is reported as its estimated frequency. However, Count-Min Sketch suffers from hash collisions, leading to overestimation of flow frequencies. Count Sketch is similar to Count-Min Sketch, but it incorporates an additional bool function to increment or decrement the mapped counters of a packet. As for the query of a flow, the median of its mapped counters is taken as its estimated frequency. However, Count Sketch requires more computational overhead due to the median calculation.
+
+Elastic Sketch \cite{b5} divided network traffic into elephant and mice flows, and separately stored them into heavy and light parts. It further compressed and merged data structures to reduce bandwidth usage while maintaining the accuracy of frequency estimation. However, Elastic Sketch focuses on separating large and small flows rather than tracking flow stability over time. Cold Filter \cite{b6} employed a two-stage filtering mechanism to separate hot and cold items, improving the accuracy of frequency estimation with low memory overhead. However, Cold Filter is designed for frequency estimation rather than stability detection. HeavyKeeper \cite{b9} adopted a count-with-exponential-decay strategy to find top-k elephant flows accurately. However, HeavyKeeper only identifies heavy hitters and cannot track the stability of flow arrival rates across consecutive time windows.
+
+Bloom filter \cite{b17}, a classical data structure introduced by Bloom, was designed to efficiently handle set membership queries. This space-efficient, probabilistic structure allowed for rapid determination of whether an element belonged to a given set. However, standard Bloom filters only support membership queries and cannot count frequencies. Luo et al. \cite{b18} curtailed false positives and accelerated queries by adapting the number of hash functions on-line, attaining superior scalability in massive-data environments. Yuan et al. \cite{b22} proposed an improved Counting Bloom Filter for counting data streams. Nevertheless, classical Bloom filters remained oblivious to temporal order and could not decide whether the same flow persisted across successive time windows.
+
+In recent years, some researchers have proposed new methods to detect flows with temporal characteristics. Sliding Sketch \cite{b12} proposed a time-zone-based method that dynamically processes data streams in sliding windows. However, Sliding Sketch focuses on sliding window queries rather than flow stability detection. BurstSketch \cite{b15} applied the Running Track technique to effectively filter potential burst flows, and employed Snapshotting technology to capture burst flows and report them at the end of each time window. However, BurstSketch targets sudden traffic spikes rather than steady patterns. HyperCalm Sketch \cite{b13} designed a one-pass algorithm to mine periodic batches in data streams. However, HyperCalm Sketch detects periodic patterns rather than stable arrival rates.
+
+Persistent flow detection shares conceptual ground with steady flow detection in their demand for continuity. A persistent flow is defined as one that appeared more than a preset threshold across consecutive time windows. Zhang et al. \cite{b19} proposed the On-Off Sketch algorithm to detect such flows, tailoring it for fast and accurate persistence identification. However, On-Off Sketch only tracks whether a flow exists in each window, not its frequency stability. Fan et al. \cite{b16} further investigated the detection of persistent yet infrequent flows and proposed the PISketch algorithm. However, PISketch focuses on flow presence rather than arrival rate stability, making it unsuited for direct steady-flow detection.
+
+Research on steady-flow identification remained sparse. Li et al. \cite{b14} introduced SteadySketch, a sketch-based structure that coupled Bloom filtering with counter-rebirth techniques to yield a memory-efficient detection mechanism. However, the scheme's computational complexity climbed sharply under high-speed traffic: every variance calculation and stability decision imposed a heavy arithmetic load. Moreover, the absence of an efficient pre-filtering step let large volumes of unsteady flows advance to later stages, needlessly swelling the system's computational and storage burden. In summary, existing detection methods cannot identify steady flows at high accuracy with low memory and computational overheads.
+
+\section{The Design of SF-Detector}
+
+\subsection{The Framework of SF-Detector}
+Considering that non-continuous flows account for the majority of packet flows in network traffic, we construct the framework of SF-Detector in Figure \ref{fig:framework}, whose key idea is to separate the filtering and recording functions of steady flows. The SF-Detector consists of a filter part and a record part. The filter part employs a triple-counting Bloom filter to track flow frequencies across three consecutive time windows and filter out non-continuous flows. We propose a rolling update mechanism for the filter part to efficiently maintain flow frequency information with minimal memory overhead. The record part adopts a hash-table-based structure to precisely track and verify potentially steady flows. We design a steady-count-based replacement strategy for the record part to accommodate new potentially-steady flows when buckets are full, improving the accuracy of steady-flow detection. At the end of each time window, we report steady flows and clear out outdated information and flows that are no longer steady.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{The framework of the SF-Detector.png}}
+\caption{The framework of the SF-Detector. It consists of a Filter part and a Record part.}
+\label{fig:framework}
+\end{figure}
+
+As for an arrived packet within a flow $f$, we first look up the flow $f$ in the record part. If the flow $f$ has been recorded in the record part, we update its frequency in the current time window. Otherwise, we insert the packet into the filter part to further observe whether the flow $f$ is a potentially steady flow. If its frequencies across three consecutive time windows satisfy the stability condition, we consider the flow $f$ as a potentially steady flow and insert it into the record part. At the end of each time window, we report the information of steady flows whose $Steady\_count$ reaches the threshold $\Gamma$, and adopt an information cleanup mechanism to clear out flows that no longer satisfy the stability condition. Finally, we perform rolling updates on the counting Bloom filters in the filter part and reset all flow frequencies in the record part.
+
+\subsection{Filter Part}
+The filter part employs a triple-counting Bloom filter architecture to track flow frequencies across three consecutive time windows and filter out non-continuous flows. This design enables accurate tracking of frequency variation patterns within consecutive time windows, all within a fixed storage footprint.
+
+\textbf{The data structure of the filter part:} As shown in Figure \ref{fig:filter}, the filter part comprises three arrays $BF_1$, $BF_2$, and $BF_3$, each containing $w$ counters. These are respectively associated with $k$ mutually independent hash functions $H_1(\cdot), H_2(\cdot), ..., H_k(\cdot)$, with the counters recording the arrival frequency of the flow within each time window. $BF_1$ records the frequency of flow occurrences in the earliest time window, $BF_2$ tracks occurrences in intermediate windows, while $BF_3$ monitors the current window's frequency in real time.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{Non-continuous flow filter structure.png}}
+\caption{Non-continuous flow filter structure with rolling updates.}
+\label{fig:filter}
+\end{figure}
+
+\textbf{Initialization:} In initial state, we set all counters in $BF_1$, $BF_2$, and $BF_3$ to zero.
+
+\textbf{Packet processing:} When the system receives a new flow $f$ not yet recorded in the record part, it maps $f$ through $k$ independent hash functions $H_1(f), ..., H_k(f)$ to $k$ specific positions $BF_3[H_i(f)]$ within $BF_3$ (where $0 \le H_i(f) \le w-1$, $1 \le i \le k$), incrementing the counter values at these positions by 1.
+
+\textbf{The identification of potentially steady flows:} At the end of each time window, for flows under detection, the system queries the counter values at corresponding hash positions across the three counting Bloom filters. There are two cases:
+\begin{itemize}
+    \item \textbf{Case 1:} If the counter values of $BF_1[H_i(f)]$, $BF_2[H_i(f)]$, and $BF_3[H_i(f)]$ are all non-zero and satisfy the stability condition, then flow $f$ is deemed to have arrived continuously over three consecutive time windows and is transferred to the record part as a potentially steady flow.
+    \item \textbf{Case 2:} If one or more of the counter values is zero or fails to satisfy the stability condition, then flow $f$ is deemed non-continuous and shall be filtered out.
+\end{itemize}
+
+\textbf{Rolling updates:} Upon time window switching, the system performs rolling updates: $BF_1$ is cleared and takes the role of recording the new current window, $BF_2$ takes the values from the previous $BF_1$, and $BF_3$ takes the values from the previous $BF_2$. This mechanism ensures efficient memory utilization with $O(1)$ time complexity.
+
+\textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filter part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The identification of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
+
+1) To check $f_1$, we obtain its mapped counters in the three Bloom filters by hashing. The estimated frequencies across three windows are 5, 4, and 5 respectively. All counters are non-zero and satisfy the stability condition. Thus, $f_1$ is identified as a potentially steady flow and transferred to the record part.
+
+2) To check $f_2$, we find that $BF_1[H_1(f_2)] = 0$. Since one counter is zero, $f_2$ did not appear continuously across three windows. Thus, $f_2$ is filtered out as a non-continuous flow.
+
+3) To check $f_3$, the estimated frequencies across three windows are 3, 4, and 8 respectively. Although all counters are non-zero, the frequency variation exceeds the tolerance threshold $\beta$. Thus, $f_3$ is filtered out as an unstable flow.
+
+\subsection{Record Part}
+The record part employs a hash-table-based structure to precisely track and verify potentially steady flows. This design avoids complex variance calculations by recording each flow's maximum and minimum values, while introducing a steady-count metric to track the flow's sustained stability.
+
+\textbf{The data structure of the record part:} As shown in Figure \ref{fig:record_table}, the record part is implemented as a hash table with a hash function $h(\cdot)$. It consists of $M$ buckets $A[1], A[2], ..., A[M]$, each of which contains $n$ cells. Each cell records the information of a flow, including Flow ID, $F_{cur}$, $Max\_val$, $Min\_val$, and $Steady\_count$. To save memory, the Flow ID only records the fingerprint of a flow identified by 5 tuples: source IP address, destination IP address, source port, destination port, and protocol type.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{Data Structure of the Steady flow Record Table.png}}
+\caption{Data Structure of the Steady Flow Record Table.}
+\label{fig:record_table}
+\end{figure}
+
+\textbf{Initialization:} In initial state, we set all fields to 0 or NULL.
+
+\textbf{Packet processing:} As for an arrived packet within a flow $f$, we first look up the flow $f$ in the record part. If the flow $f$ is recorded in the record part, we increment its frequency $F_{cur}$ by 1 and update $Max\_val$ and $Min\_val$ accordingly. Otherwise, we insert the packet into the filter part.
+
+\textbf{The insertion of a potentially steady flow:} If the flow $f$ is identified as a potentially steady flow by the filter part, we need to look up the record part for an empty cell in bucket $A[h(f)]$ and place the flow $f$ into it. There are two cases:
+\begin{itemize}
+    \item \textbf{Case 1:} There is an empty cell in the bucket $A[h(f)]$. In this case, we insert the flow $f$ into the empty cell. Specifically, we set Flow ID as $f$, $F_{cur}$ as 0, $Max\_val$ and $Min\_val$ as the estimated frequency from the filter part, and $Steady\_count$ as 0.
+    \item \textbf{Case 2:} If there is no empty cell in the bucket $A[h(f)]$, we find the flow with the smallest $Steady\_count$ and replace it with the flow $f$. This replacement strategy ensures that flows with longer stability history are preserved.
+\end{itemize}
+
+\textbf{The report of steady flows:} At the end of each time window, we traverse each cell in the record part to report current steady flows. For each non-empty cell, we check if the stability condition is satisfied and whether $Steady\_count$ reaches the threshold $\Gamma$. There are three cases:
+\begin{itemize}
+    \item \textbf{Case 1:} If $Max\_val > (1+\beta) \cdot \frac{Max\_val + Min\_val}{2}$ or $Min\_val < (1-\beta) \cdot \frac{Max\_val + Min\_val}{2}$, the flow in this cell is no longer steady, and we reset all information in this cell.
+    \item \textbf{Case 2:} If the stability condition is satisfied but $Steady\_count < \Gamma$, the flow in this cell is still a potentially steady flow, and we do not report the flow. Meanwhile, we increment $Steady\_count$ by 1 and reset $F_{cur}$.
+    \item \textbf{Case 3:} If the stability condition is satisfied and $Steady\_count \ge \Gamma$, the flow in this cell is confirmed as a steady flow, and we report the flow. Finally, we reset $F_{cur}$.
+\end{itemize}
+
+\textbf{A running example:} Figure \ref{fig:record_table} depicts a running example of the record part. Assume that the fluctuation tolerance $\beta = 0.2$, the threshold of consecutive stable windows $\Gamma = 3$, and the current time window $W_{cur} = 5$. The insertion of $f_1$, $f_2$, $f_3$ and the end-of-window processing can be described as follows.
+
+1) To insert a packet in $f_1$, it has been recorded in its directly mapped bucket. Therefore, we simply increment $F_{cur}$ of the corresponding cell by 1 and update $Max\_val$ or $Min\_val$ if necessary.
+
+2) To insert $f_2$ identified as a potentially steady flow by the filter part, we find an empty cell in the bucket $A[h(f_2)]$. We insert $(f_2, 0, 15, 15, 0)$ into the empty cell, where 15 is the estimated frequency from the filter part.
+
+3) To insert $f_3$ identified as a potentially steady flow, there is no empty cell in the bucket $A[h(f_3)]$. We select the flow with the smallest $Steady\_count$ in the bucket and replace it with $(f_3, 0, 12, 12, 0)$.
+
+4) At the end of the time window, we traverse each cell to check stability. For $f_4$ with $Max\_val = 20$ and $Min\_val = 8$, the frequency variation exceeds the tolerance threshold $\beta$. Thus, we reset all fields in this cell.
+
+5) For $f_5$ with $Max\_val = 18$, $Min\_val = 15$, and $Steady\_count = 2$, the stability condition is satisfied but $Steady\_count < \Gamma$. Thus, we increment $Steady\_count$ to 3 and reset $F_{cur}$ to 0.
+
+6) For $f_6$ with $Max\_val = 25$, $Min\_val = 22$, and $Steady\_count = 4$, the stability condition is satisfied and $Steady\_count \ge \Gamma$. Thus, we report $f_6$ as a steady flow and reset $F_{cur}$ to 0.
+
+\subsection{Theoretical Analysis}
+In this section, we perform the theoretical analysis of SF-Detector. We first derive the error bounds of flow frequency estimation in the filter part in Section 3.4.1. Then, we infer the error bounds of steady flow detection in the record part in Section 3.4.2. Finally, we provide the space and time complexities of SF-Detector in Section 3.4.3.
+
+\subsubsection{The error bounds of flow frequency estimation in the filter part}
+
+\begin{theorem}
+Suppose the filter part consists of $w$ counters and $k$ independent hash functions. Let $S$ be a sequence of network traffic with $W$ packets. For a flow $g$ in the filter part, let $\hat{f}$ be its estimated frequency, and let $f$ be its true frequency. Given a small variable $\delta$ ($\delta > 0$), we can infer the error bound of flow frequency estimation in the filter part as
+\begin{equation}
+    P(\hat{f} - f > \delta \cdot W) \le \left(\frac{1}{\delta \cdot w}\right)^k.
+\end{equation}
+\end{theorem}
+
+\textit{Proof.} As for any flow $g$, let $X_j$ ($1 \le j \le k$) be its mapped counter in the filter part by the $j$-th hash function. We can formulate $X_j$ as
+\begin{equation}
+    X_j = f + \sum_{g_i \ne g} \mathbb{I}(h_j(g_i) = h_j(g)) \cdot f_{g_i},
+\end{equation}
+where $g_i$ refers to a flow that is different from the flow $g$ in the filter part with the frequency $f_{g_i}$; $h_j(\cdot)$ represents the $j$-th hash function; $\mathbb{I}(\cdot)$ is a boolean function.
+
+Since there are a total of $W$ packets, other flows contain $W - f$ packets. Suppose that all flows are randomly mapped into $w$ counters, we can obtain the expectation of the frequency estimation error of the flow $g$ caused by other flows as
+\begin{equation}
+    E\left[\sum_{g_i \ne g} \mathbb{I}(h_j(g_i) = h_j(g)) \cdot f_{g_i}\right] = \frac{W - f}{w}.
+\end{equation}
+
+Since all hash functions are independent of each other, we can apply the Markov inequality to derive the error bound of flow frequency estimation at the $j$-th mapped counter of flow $g$ as
+\begin{equation}
+    P\left(\sum_{g_i \ne g} \mathbb{I}(h_j(g_i) = h_j(g)) \cdot f_{g_i} > \delta \cdot W\right) \le \frac{W - f}{\delta \cdot W \cdot w} < \frac{1}{\delta \cdot w}.
+\end{equation}
+
+Since the filter part takes the minimal mapped counter of a flow as its estimated frequency, we can express the estimated frequency of the flow $g$ as
+\begin{equation}
+    \hat{f} = \min_{1 \le j \le k} X_j.
+\end{equation}
+
+Since all $k$ hash functions are independent, the probability that all mapped counters exceed the error threshold equals the product of individual probabilities. Consequently, we can derive the error bound of flow frequency estimation in the filter part as
+\begin{equation}
+    P(\hat{f} - f > \delta \cdot W) \le \left(\frac{1}{\delta \cdot w}\right)^k.
+\end{equation}
+\hfill $\square$
+
+\subsubsection{The error bounds of steady flow detection in the record part}
+
+\begin{theorem}
+Suppose the record part consists of $M$ buckets, each of which contains $n$ cells. The record part records $F$ flows, where there are $S$ flows whose $Steady\_count$ values are lower than the threshold $\Gamma$. Let $f$ and $\hat{f}$ respectively be the true frequency and estimated one of a flow in the record part. We can infer the error bound of flow frequency estimation in the record part as
+\begin{equation}
+    E\left(|\hat{f} - f|\right) < \frac{1}{M} \cdot \left(\frac{e^{-\lambda} \lambda^n}{n!}\right)^3 \cdot \frac{S}{F \cdot n}.
+\end{equation}
+\end{theorem}
+
+\textit{Proof.} We first analyze the insertion process in the record part:
+
+\textbf{I:} As for any flow $g$, if it has been recorded in the record part, we directly increase its counter value by 1. In this case, the estimated frequency of flow $g$ is equal to its true frequency.
+
+\textbf{II:} If the flow $g$ is not recorded in the record part and there is an empty cell in its directly mapped bucket, the flow $g$ is inserted into this empty cell. In this case, the estimated frequency of flow $g$ is also equal to its true frequency.
+
+\textbf{III:} If the flow $g$ is replaced by a new potentially-steady flow $g'$, and the estimated frequency of flow $g$ is lower than its true frequency.
+
+In summary, the error of flow frequency estimation in the record part arises from the replacement of flows, and replacement occurs only when the following events happen simultaneously: 1) Event $A$: The flow $g'$ is mapped to the same bucket as the flow $g$. 2) Event $B$: There are no empty cells in the bucket. 3) Event $C$: The $Steady\_count$ of the flow $g$ is the smallest in the bucket. 4) Event $D$: The flow $g$ is successfully replaced by the flow $g'$.
+
+Since the above events are independent of each other, the probability of the flow $g$ being replaced is
+\begin{equation}
+    P = P(A \cap B \cap C \cap D) = P(A) \cdot P(B) \cdot P(C) \cdot P(D).
+\end{equation}
+
+Owing to that each flow is randomly mapped into the record part by hashing, we can consider the insertion of each flow as an independent random event. Consequently, we can infer that occurrence probability of the event $A$ as
+\begin{equation}
+    P(A) = \frac{1}{M}.
+\end{equation}
+
+Suppose that each flow will be randomly inserted into any bucket, the number of flows recorded in each bucket approximately follows a Poisson distribution with parameter $\lambda = \frac{F}{M}$. Hence, the occurrence probability of the $B$ as
+\begin{equation}
+    P(B) = \left(\frac{e^{-\lambda} \lambda^n}{n!}\right)^3.
+\end{equation}
+
+Because there are $S$ flows with $Steady\_count$ values lower than the threshold $\Gamma$, the probability that the flow $g$ has the smallest $Steady\_count$ in the bucket is
+\begin{equation}
+    P(C) = \frac{S}{F \cdot n}.
+\end{equation}
+
+The occurrence probability of the event $D$ as
+\begin{equation}
+    P(D) = 1.
+\end{equation}
+
+Based on the above discussion, we can derive the probability that flow $g$ is replaced by a potentially steady flow $g'$ in current time window as
+\begin{equation}
+    P = P(A \cap B \cap C \cap D) = \frac{1}{M} \cdot \left(\frac{e^{-\lambda} \lambda^n}{n!}\right)^3 \cdot \frac{S}{F \cdot n}.
+\end{equation}
+
+The flow $g$ is replaced because its $Steady\_count$ is the smallest. Consequently, we can derive the error bound of flow frequency estimation in the record part as
+\begin{equation}
+    E\left(|\hat{f} - f|\right) < \alpha \cdot P = \frac{\alpha}{M} \cdot \left(\frac{e^{-\lambda} \lambda^n}{n!}\right)^3 \cdot \frac{S}{F \cdot n},
+\end{equation}
+where $\alpha$ represents the maximum frequency loss due to replacement.
+\hfill $\square$
+
+\subsubsection{Space and time complexities}
+
+\textbf{Space complexity:} SF-Detector consists of a filter part and a record part. The filter part contains $3 \times w$ counters, where $w$ is the number of counters in each Counting Bloom Filter. Meanwhile, the record part contains $M \cdot n$ cells, where $M$ is the number of buckets and $n$ is the number of cells for each bucket. Suppose the size of each counter in the filter part and each cell in the record part respectively as $S_1$ and $S_2$, we can get the memory size of SF-Detector as $3 \cdot w \cdot S_1 + M \cdot n \cdot S_2$. In our SF-Detector, each counter in the filter part is set as 8 bits. Each cell in the record part consists of five fields: Flow ID, $F_{cur}$, $Max\_val$, $Min\_val$, and $Steady\_count$. Flow ID is usually manifested as a flow fingerprint typically with 32 bits. For $F_{cur}$, $Max\_val$, and $Min\_val$, 12 bits are adequate to record the frequency of a flow in a time window with 100K packets. $Steady\_count$ can be configured with 8 bits to record the number of consecutive stable windows. In summary, $S_1$ is 8 bits and $S_2$ is 76 bits. According to our experimental settings, $w$, $M$, and $n$ are typically set to 4096, 1024, and 4, respectively. Consequently, we can calculate the memory size of SF-Detector approximately as 51KB. In conclusion, SF-Detector is a lightweight method with low space complexity.
+
+\textbf{Time complexity:} For an arrived packet within a flow $f$, we first look up the flow $f$ in the record part by hashing. This lookup process involves $n$ cells, where $n$ is the number of cells in each bucket of the record part. If the flow $f$ has been recorded in the record part, we only need to update its frequency in the current time window. This case is executed with the time complexity $O(n)$. Otherwise, we need to map the flow into the filter part using its $k$ hash functions and update the $k$ mapped counters. If the updated counter does not satisfy the stability condition, the flow is not yet a potentially steady flow, and packet processing ends. This case performs with the time complexity $O(n + k)$. If the flow is identified as potentially steady, we insert the flow $f$ into the record part, which requires checking $n$ cells. Hence, the execution of this case needs to take the time complexity $O(2n + k)$. In summary, SF-Detector processes each packet with the time complexity $O(2n + k)$ in the worst case. Since $n$ and $k$ are generally configured as very small values (typically $n = 4$ and $k = 3$), SF-Detector is a lightweight method with very low time complexity.
+
+\section{Experiments}
+In this section, we present the experimental results of SF-Detector. Firstly, we introduce our experimental setup. Subsequently, we show the parameter settings of SF-Detector. Finally, we evaluate the performance of SF-Detector and compare it with prevalent steady-flow detection methods.
+
+\subsection{Experimental Setup}
+
+\textbf{Datasets:}
+\begin{itemize}
+    \item \textbf{CAIDA Dataset:} The CAIDA dataset \cite{b23} was collected by the University of California, San Diego (UCSD). We select 10M packets from CAIDA2020 and CAIDA2022 traces respectively, which contains 1,245 steady flows for the time window size set as 1,500 packets.
+    \item \textbf{MAWI Dataset:} The MAWI dataset \cite{b24} was collected from daily traces at the transit link of WIDE to the upstream ISP. We select 10M packets, which contains 1,102 steady flows for the time window size set as 1,500 packets.
+\end{itemize}
+
+\textbf{Implementation:}
+We implement the state-of-the-art methods including SF-Detector, SteadySketch \cite{b14}, Strawman, SteadySketchLite, and SteadySketchEnhanced, and integrate them in a C++ program. For SteadySketch, we set the ratio of the memory usage of its RBF (Rolling Bloom Filter) to its total memory size as 0.5. Meanwhile, its counter array contains slots determined by given memory size. For Strawman, we implement a basic hash-table-based method without filtering. For SteadySketchLite, we use a simplified version of SteadySketch with reduced hash functions. For SteadySketchEnhanced, we extend SteadySketch with additional stability verification. For SF-Detector, we set the number of counters in its filter part to 4096 and 4 cells for each bucket in its record part, where the number of buckets is determined by given memory size. We set the fluctuation tolerance threshold $\beta$ as 0.2, the number threshold of consecutively stable time windows $\Gamma$ as 3, and the time window size as 1,500 packets. Subsequently, we run the program on a server configured with an Intel Core i7 processor and 16GB of memory.
+
+\textbf{Metrics:}
+\begin{itemize}
+    \item \textbf{Precision Rate (PR):} The ratio of the number of correctly reported steady flows to the total number of reported steady flows.
+    \item \textbf{Recall Rate (RR):} The ratio of the number of correctly reported steady flows to the true number of steady flows.
+    \item \textbf{F1 Score:} $\frac{2 \cdot PR \cdot RR}{PR + RR}$. The F1 score is the harmonic mean of precision and recall, used to measure the overall accuracy of a method in detecting steady flows.
+    \item \textbf{Throughput:} $\frac{N}{T}$, where $N$ is the total number of packets, and $T$ is the total measurement time. Throughput represents million insertions per second (MIPS).
+\end{itemize}
+
+\subsection{Parameter Settings}
+We conducted a comprehensive evaluation of SF-Detector's key parameters, including the number of hash functions $k$, the steady flow fluctuation tolerance threshold $\beta$, and the steady flow continuous time window threshold $\Gamma$. In our experiments, we configured the counting Bloom filter for the discontinuous flow filter to three elements, with a time window size of 1,500 packets. Experiments were conducted on the CAIDA2022 dataset, and the impact of parameters was evaluated using F1 scores.
+
+\textbf{Effects of $k$:} Experimental results demonstrate the optimal value of $k$ is 3. As allocated memory increases, the F1 score, recall, and precision for all $k$ values exhibit an upward trend, reaching saturation once a certain memory threshold is attained. When $k=3$, the algorithm demonstrates optimal overall performance, with the F1 score exceeding 0.97 at 45KB of allocated memory and stabilising around 0.98 at higher memory allocations.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{图(a).png}
+\caption{Effects of the number of hash functions $k$ on F1 score.}
+\label{fig:param_k}
+\end{figure}
+
+\textbf{Effects of $\beta$:} The choice of $\beta$ significantly impacts the F1 score. The algorithm exhibits optimal overall performance when $\beta$ is set to 0.2. At this setting, the F1 score reaches 0.97 when memory reaches 55KB and remains around 0.975 at higher memory levels. This indicates that $\beta=0.2$ achieves a favourable balance between recall and precision.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{图(b).png}
+\caption{Effects of the fluctuation tolerance threshold $\beta$ on F1 score.}
+\label{fig:param_beta}
+\end{figure}
+
+\textbf{Effects of $\Gamma$:} When $\Gamma$ is set to 3, the algorithm exhibits optimal overall performance. At this setting, the F1 score reaches 0.97 when memory reaches 55KB and remains around 0.985 at higher memory levels, exceeding 98\% of the target. This indicates that when streams remain active for three consecutive time windows, the algorithm more accurately identifies steady streams.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{图(c).png}
+\caption{Effects of the consecutive stable window threshold $\Gamma$ on F1 score.}
+\label{fig:param_gamma}
+\end{figure}
+
+\subsection{Experimental Results}
+In this section, we conduct extensive experiments on three real-world datasets and evaluate the performance of SF-Detector through four metrics (PR, RR, F1 score, and Throughput). The experimental results demonstrate that SF-Detector can accurately detect steady flows under limited memory conditions.
+
+\textbf{Precision Rate:} Based on the precision rate analysis across three datasets (CAIDA2020, CAIDA2022, and MAWI), SF-Detector demonstrates superior performance with precision rates consistently exceeding 0.7 and reaching up to 0.95, significantly outperforming all other methods. SteadySketchEnhanced ranks second with PR values between 0.65-0.85, while SteadySketch and SteadySketchLite show moderate performance in the 0.4-0.75 range. The Strawman baseline exhibits the lowest precision rates (0.3-0.65) across all scenarios.
+
+\textbf{Recall Rate:} SF-Detector achieves exceptional performance with recall rates consistently between 0.75-1.0, demonstrating superior capability in detecting true steady flows with minimal false negatives. SteadySketchEnhanced shows competitive performance with RR values ranging from 0.65-0.85, while SteadySketch and SteadySketchLite exhibit moderate recall rates in the 0.4-0.8 range.
+
+\textbf{F1 Score:} SF-Detector achieves outstanding overall performance with F1 scores consistently ranging from 0.7-1.0, demonstrating optimal balance between precision and recall in steady flow detection. SteadySketchEnhanced ranks second with F1 scores between 0.55-0.82.
+
+\textbf{Throughput:} SF-Detector maintains consistently high processing throughput of approximately 39-40 MIPS across all memory sizes, demonstrating exceptional efficiency and scalability. SteadySketchEnhanced shows competitive throughput performance ranging from 24-37 MIPS, while SteadySketch, SteadySketchLite, and Strawman exhibit similar throughput patterns, ranging from 20-25 MIPS across different memory configurations.
+
+\section{Conclusion}
+In this paper, we proposed SF-Detector to efficiently and accurately detect steady flows. By separating filtering and recording, and using a simplified extreme-value-based stability check, SF-Detector overcomes the memory and speed limitations of previous work. Experiments show it improves precision by up to 20\% and maintains high throughput.
+
+\begin{thebibliography}{00}
+
+\bibitem{b1} Xiong B, Liu Y, Liu R, et al. ActiveGuardian: An accurate and efficient algorithm for identifying active elephant flows in network traffic[J]. Journal of Network and Computer Applications, 2024, 224: 103853.
+\bibitem{b2} Xiong B, Chang Y, Zhang Y, et al. AF-Detector: An accurate low-overhead method for detecting active flows in network traffic[J]. Computer Networks, 2025: 111562.
+\bibitem{b3} Xiong B, et al. RobustSketch: Robust Identification of Heavy Flows Supporting Traffic Jitter[J]. Journal of Software, 2024, 36(2): 660-679.
+\bibitem{b4} Roy P, Khan A, Alonso G. Augmented sketch: Faster and more accurate stream processing[C]//Proceedings of the 2016 International Conference on Management of Data. ACM, 2016: 1449-1463.
+\bibitem{b5} Yang T, Jiang J, Liu P, et al. Elastic sketch: Adaptive and fast network-wide measurements[C]//Proceedings of the 2018 Conference of the ACM Special Interest Group on Data Communication. ACM, 2018: 561-575.
+\bibitem{b6} Zhou Y, Yang T, Jiang J, et al. Cold filter: A meta-framework for faster and more accurate stream processing[C]//Proceedings of the 2018 International Conference on Management of Data. ACM, 2018: 741-756.
+\bibitem{b7} Xiao Q, Zhou Y, Chen S. Better with fewer bits: Improving the performance of cardinality estimation of large data streams[C]//IEEE INFOCOM 2017-IEEE Conference on Computer Communications. IEEE, 2017: 1-9.
+\bibitem{b8} Tang L, Huang Q, Lee P P C. MV-Sketch: A fast and compact invertible sketch for heavy flow detection in network data streams[C]//IEEE INFOCOM 2019. IEEE, 2019: 2026-2034.
+\bibitem{b9} Yang T, Zhang H, Li J, et al. HeavyKeeper: an accurate algorithm for finding Top-k elephant flows[J]. IEEE/ACM Transactions on Networking, 2019, 27(5): 1845-1858.
+\bibitem{b10} Epicoco I, Melle C, Cafaro M, et al. UDDSketch: Accurate tracking of quantiles in data streams[J]. IEEE Access, 2020, 8: 147604-147617.
+\bibitem{b11} Gu Y, McCallum A, Towsley D. Detecting anomalies in network traffic using maximum entropy estimation[C]//Proceedings of the 5th ACM SIGCOMM Conference on Internet Measurement. ACM, 2005: 32-32.
+\bibitem{b12} Gou X, He L, Zhang Y, et al. Sliding sketches: A framework using time zones for data stream processing in sliding windows[C]//Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining. ACM, 2020: 1015-1025.
+\bibitem{b13} Liu Z, Kong C, Yang K, et al. HyperCalm Sketch: One-pass mining periodic batches in data streams[C]//2023 IEEE 39th International Conference on Data Engineering. IEEE, 2023: 14-26.
+\bibitem{b14} Li X, Fan Z, Li H, et al. SteadySketch: Finding steady flows in data streams[C]//2023 IEEE/ACM 31st International Symposium on Quality of Service. IEEE, 2023: 1-9.
+\bibitem{b15} Zhong Z, Yan S, Li Z, et al. BurstSketch: Finding bursts in data streams[C]//Proceedings of the 2021 International Conference on Management of Data. ACM, 2021: 2375-2383.
+\bibitem{b16} Fan Z, Hu Z, Wu Y, et al. PISketch: Finding persistent and infrequent flows[C]//Proceedings of the ACM SIGCOMM Workshop on Formal Foundations and Security of Programmable Network Infrastructures. ACM, 2022: 8-14.
+\bibitem{b17} Bloom B H. Space/time trade-offs in hash coding with allowable errors[J]. Communications of the ACM, 1970, 13(7): 422-426.
+\bibitem{b18} Luo L, Guo D, Ma R T B, et al. Optimizing Bloom filter: Challenges, solutions, and comparisons[J]. IEEE Communications Surveys \& Tutorials, 2018, 21(2): 1912-1949.
+\bibitem{b19} Zhang Y, Li J, Lei Y, et al. On-Off Sketch: A fast and accurate sketch on persistence[J]. Proceedings of the VLDB Endowment, 2020, 14(2): 128-140.
+\bibitem{b20} Cormode G, Muthukrishnan S. An improved data stream summary: the count-min sketch and its applications[J]. Journal of Algorithms, 2005, 55(1): 58-75.
+\bibitem{b21} Charikar M, Chen K, Farach-Colton M. Finding frequent items in data streams[C]//Proceedings of the 29th International Colloquium on Automata, Languages and Programming. Springer, 2002: 693-703.
+\bibitem{b22} Yuan Z, Miao J, Jia Y, et al. Counting data stream based on improved counting Bloom filter[C]//2008 The Ninth International Conference on Web-Age Information Management. IEEE, 2008: 512-519.
+\bibitem{b23} The CAIDA UCSD Anonymized Internet Traces[EB/OL]. https://www.caida.org/catalog/datasets/passive\_dataset.
+\bibitem{b24} MAWI Working Group Traffic Archive[EB/OL]. https://mawi.wide.ad.jp/mawi/.
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,804 @@
+I
+SF-Detector:An efficient and accurate method for detecting steady flows in network traffic
+Abstract
+Steady flows refer to packet flows whose packet arrival rates remain relatively steady
+across multiple consecutive time windows. Such packet flows may indicate network security
+threats like DDoS attacks, and also reflect sustained network traffic demands useful for
+resource planning and cache optimization. Previous work requires storing per-flow
+information across multiple time windows to track flow stability, resulting in high memory
+overhead and low throughput. To address these issues, we propose an efficient and accurate
+method for detecting steady flows in network traffic called SF-Detector, which separates the
+filtering and recording functions of packet flows, enabling efficient detection and reporting of
+steady flows. In particular, SF-Detector consists of a filtering part that employs multi-window
+counting Bloom filters to remove non-continuous flows, and a recording part that adopts a
+hash table to track and verify steady flows. As for the recording part, we design a stability
+determination method based on the ratio of maximum to minimum arrival frequencies across
+consecutive time windows. If this ratio stays within a tolerance threshold, the flow is
+considered steady. This simple comparison avoids complex variance calculations, reducing
+computational overhead. Additionally, we devise a flow entry replacement mechanism for the
+record table. When the table is full, the entry with the smallest steady-count is replaced,
+ensuring efficient memory utilization. Finally, we evaluate SF-Detector through theoretical
+analysis and experiments on real network traces (CAIDA2020, CAIDA2022, MAWI).
+Compared to state-of-the-art methods, SF-Detector improves precision by up to 20%,
+achieving over 95% precision, nearly 100% recall, and 40 MIPS throughput.
+1 Introduction
+Network measurement plays a vital role in the traffic engineering and network security
+management of large-scale dynamic network traffic[1]-[5]. It provides critical information
+such as traffic volume statistics, flow distributions, and anomaly patterns for applications
+including network optimization, security monitoring, and resource allocation. These
+applications demand high measurement accuracy to ensure reliable decision-making.
+However, it is impractical to store all data due to the high speed and massive scale of modern
+network traffic, forcing measurement to rely on sampling or approximation techniques rather
+than exact recording. This makes achieving both high-precision and high-overhead network
+measurement particularly challenging. To address this challenge, Sketch-based techniques
+achieve accurate measurement with low memory consumption through probabilistic
+algorithms[6]. Therefore, they are widely applied in network measurement[6]. These
+techniques have demonstrated excellent performance in tasks such as flow cardinality
+estimation[7],
+flow
+frequency
+estimation[8],
+heavy
+hitter
+identification[9],
+quantile
+estimation[10], and entropy estimation[11]. Besides these traditional measurement tasks,
+researchers have recently extended Sketch-based techniques to detecting novel flow patterns,
+including active flows[12], periodic flows[13], steady flows[14], burst flows[15], and
+persistent flows[16].
+In this paper, steady flows refer to those flows whose arrival rates remain around a fixed
+value across multiple consecutive time windows[14]. These flows play significant roles in
+II
+network traffic analysis, bandwidth management, and cache optimization. In network traffic
+analysis scenarios, Steady flows characterize traffic patterns and distinguish normal from
+abnormal traffic, serving as the foundation for traffic analysis and classification; In bandwidth
+management, Steady flows exhibit predictable traffic patterns, supporting precise bandwidth
+allocation that prevents network congestion and minimizes packet loss during peak periods. In
+cache optimization, Steady flows reflect sustained user access demands, supporting more
+effective cache strategies that improve hit rates and reduce bandwidth consumption. Therefore,
+it is significant to accurately identify steady flows for network performance optimization and
+rational resource allocation.
+To the best of our knowledge, there is little work on the identification of steady flows
+until now. Among existing efforts, SteadySketch[14] achieves good precision and recall, but
+is too slow for high-speed data flows and prone to memory overflow. Besides, persistent flow
+detection is closely related, as it also tracks flows across time windows. On-Off Sketch[19]
+and PISketch[16] achieve promising results in persistent flow detection, but they track flow
+presence across windows rather than arrival rate stability, making them unsuitable for steady
+flow detection. Researchers have also developed various enhancement approaches for
+Bloom filters[18] to reduce false positive rates and optimize space utilization, but traditional
+Bloom filters cannot be directly applied to stable flow detection due to their inherent
+structural constraints.
+1.提出了什么什么东西
+2.核心思想是什么，先干什么，再干什么
+3.先干的事情设计了什么模块，模块的原理效果
+4.后干的事情设计了什么模块，模块的原理效果
+5.。。。
+To address the aforementioned problems, we propose SF-Detector, an efficient and
+accurate method for detecting steady flows in network traffic. The core idea is to separate
+filtering and recording functions: first filtering out non-continuous flows, then precisely
+tracking potential steady flows. For the filtering stage, we design a triple-counting Bloom
+filter that monitors flow frequencies across three consecutive time windows, effectively
+eliminating non-continuous flows and reducing downstream computational burden. For the
+recording stage, we design a hash-table-based steady flow record table with an independent
+entry for each flow. To avoid the high complexity of variance-based methods, we propose a
+stability determination method based on extreme value differences, evaluating stability by
+comparing maximum and minimum frequencies combined with a tolerance parameter.
+Additionally,
+we
+devise
+a
+steady-count-based
+replacement
+mechanism
+to
+handle
+memory overflow by prioritizing the replacement of flows with fewer consecutive steady
+periods.The main contributions of this paper are summarized as follows:
+
+We propose a low-overhead method called SF-Detector that utilizes a hierarchical
+filtering mechanism to separate non-continuous flow elimination via a triple-counting
+Bloom filter from steady flow verification using a hash-table-based structure, thereby
+enabling efficient and accurate steady flow detection with minimal memory overhead.
+
+We design a stability determination method based on extreme value differences that
+evaluates flow stability by comparing maximum and minimum frequencies across
+III
+consecutive windows with a tolerance parameter to replace high-complexity variance
+calculations, thereby significantly reducing computational overhead and improving
+detection efficiency.
+
+We design a steady-count-based replacement mechanism that addresses memory
+overflow by prioritizing the eviction of flows with the fewest consecutive steady periods
+when space is limited, thereby ensuring efficient storage utilization while maintaining
+detection accuracy.
+2 Definition of Steady flow and Related Work
+2.1 Definition of Steady flow
+Suppose there exists a sequential packet flow sequence S = {e₁, e₂, e₃, ...}, which is
+divided into multiple fixed-size time windows w₁, w₂, w₃, .... For the packet flow e, let its
+arrival frequencies in each time window be f₁, f₂, f₃, .... If the flow e satisfies the following
+condition across consecutive time windows wi, w(i+1), ..., w(i+n):
+k + 1 ≥Γ ∧Max_val ≤(1 + β) ⋅(Max_val + Min_val)/2 ∧Min_val
+≥(1 −β) ⋅(Max_val + Min_val)/2
+Where β represents the steady flow fluctuation tolerance parameter.It measures the
+permissible range of frequency variation for a flow across different time windows. And Γ
+denotes the threshold for the number of consecutive active time windows required to classify
+a flow as steady.Then Max_val denotes the maximum occurrence frequency of flow e within
+consecutive time windows, while Min_val denotes the minimum occurrence frequency of
+flow e within consecutive time windows. When these conditions are met, flow e is classified
+as a steady flow, with its steady period spanning from wᵢto wᵢ₊ₖ. Table 1 presents the
+commonly used symbols and their meanings in the SF-Detector method.
+表1:SF-Detector 中的常用符号
+Symbol
+significance
+β
+Steady Flow Fluctuation Tolerance
+Threshold
+Γ
+Steady Flow Continuous Time
+Window Count Threshold
+Max_val
+Maximum frequency in the log
+window
+Min_val
+The minimum frequency recorded
+in the full time window
+Fcur
+Frequency flowing in the current
+time window
+IV
+steady count
+Number of consecutive windows
+satisfying stability conditions
+BF₁, BF₂, BF₃
+Three Rolling-Count Bloom
+Filters
+M
+Number of buckets in a hash table
+Hash Table Bucket Count
+n
+Number of storage units per
+bucket
+k
+Number of Hash Functions in
+Discontinuous Flow Filters
+w
+Number of cells in a single
+counting-based Bloom filter within
+a discontinuous flow filter
+2.2 Relevant work
+Bloom filters, a classical data structure introduced by Bloom et al., were designed to
+efficiently handle set membership queries. This space-efficient, probabilistic structure allowed
+for rapid determination of whether an element belonged to a given set. It offered significant
+advantages in query speed and memory usage, though it came with a certain false positive
+rate.To overcome the inherent limitations of standard Bloom filters, researchers introduced a
+series of refined variants. Luo et al. curtailed false positives and accelerated queries by
+adapting the number of hash functions on-line, attaining superior scalability in massive-data
+environments. Guo et al. presented an adaptive Bloom filter that reshaped its internal
+parameters to the empirical distribution of the incoming data, yielding near-optimal space
+consumption.
+Rottenstreich
+et
+al.,
+through
+a
+rigorous
+performance
+evaluation
+in
+network-centric workloads, proposed a hierarchical Bloom-filter architecture that markedly
+suppressed false-positive rates while preserving constant-time membership checks.Ma et al.
+parallelized membership testing by proposing a distributed Bloom-filter framework that
+sustained large-scale concurrent queries and multiplied system throughput. Luo et al. reduced
+storage footprint through compressed Bloom filters that retained the original false-positive
+guarantees while shrinking space usage. Nevertheless, these refinements left the fundamental
+limitation untouched: classical Bloom filters remained oblivious to temporal order and could
+not decide whether the same flow persisted across successive time windows.
+Steady flows and persistent flows shared conceptual ground in their demand for
+continuity. A persistent flow was defined as one that appeared more than a preset threshold
+across consecutive time windows; its hallmark was both continuity and persistence. Zhang et
+al. proposed the On-Off Sketch algorithm to detect such flows, tailoring it for fast and
+accurate persistence identification. The method adopted a sketch data structure to estimate
+flow persistence efficiently, furnished complete theoretical analyses with accuracy guarantees,
+and relied on extensive experiments to confirm its effectiveness.Performance comparisons
+V
+against Count-Min Sketch and PIE showed that On-Off Sketch delivered higher temporal and
+spatial efficiency when processing large-scale data streams. It accurately identified flows that
+persisted across multiple time windows and offered a novel solution for persistent-flow
+detection. Building on this foundation, Xin et al. further investigated the detection of
+persistent yet infrequent flows and proposed the PISketch algorithm. Their approach assessed
+both persistence and infrequency through a weight-fusion strategy coupled with a
+reward–penalty mechanism, while a Weight Sketch structure stored and maintained per-flow
+weight information. The scheme effectively singled out flows that remained present despite
+low frequency. However, because persistent-flow detection focused on the number of
+occurrences within time windows rather than on the stability of arrival rates, the method
+remained unsuited for direct steady-flow detection.
+Research on steady-flow identification remained sparse, and efforts that merged
+flow-stability characteristics with real-time demands were still in their infancy. Li et al.
+introduced SteadySketch, a sketch-based structure that coupled Bloom filtering with
+counter-rebirth techniques to yield a memory-efficient detection mechanism. Experiments
+showed robust performance in precision, recall, and throughput, and the method successfully
+recognized persistently steady flows while meeting real-time constraints. By recording arrival
+patterns in a compact sketch and applying statistical tests to estimate stability, the scheme
+proved its worth in network management and cache optimization, furnishing both a practical
+framework and a theoretical basis for steady-flow detection.Closer inspection revealed that
+the scheme’s computational complexity climbed sharply under high-speed traffic: every
+variance calculation and stability decision imposed a heavy arithmetic load. These costs
+created a persistent bottleneck when extreme real-time deadlines had to be met, and both
+memory efficiency and query latency still called for further reduction. Moreover, the absence
+of a efficient pre-filtering step for continuity let large volumes of unsteady flows advance to
+later stages, needlessly swelling the system’s computational and storage burden.
+3.The Design of SF-Detector
+3.1Design Philosophy
+Existing steady flow detection methods based on Sketch typically require recording
+frequency information across multiple time windows to compute variance for stability
+assessment. This not only increases memory overhead but also leads to biased flow size
+estimates due to hash collisions. To address this issue, this paper proposes a novel stability
+detection algorithm that evaluates stability by comparing a flow's maximum and minimum
+values across different time windows, thereby avoiding complex variance calculations.
+Furthermore,
+to
+ensure
+precise
+recording
+of
+steady
+flows,
+this
+paper
+designs
+a
+hash-table-based steady flow record table. Each flow is assigned an independent entry to log
+its behavioural characteristics across consecutive windows. This design not only supports
+rapid access to flow states but also enables dynamic updates or deletions of flow entries
+failing to meet stability criteria. Furthermore, considering potential hash table overflow issues
+in large-scale network traffic, this paper designs a multi-time-window discontinuous flow
+filter based on Counting Bloom Filters. It determines whether a flow is continuous by using
+three independent counting Bloom filters to record frequency changes within three
+consecutive time windows. The counting Bloom filter employs counters to precisely record
+VI
+each flow's arrival frequency within the time window, effectively mitigating misclassification
+issues inherent in traditional Bloom filters when processing frequency data. This mechanism
+not only accurately tracks flow frequency fluctuations but also significantly reduces the load
+on steady flow record tables, thereby lowering the overall computational overhead of steady
+flow detection. Integrating these approaches, this paper proposes SF-Detector, an efficient
+steady flow identification method capable of low-overhead, high-precision steady flow
+detection in high-traffic environments, as illustrated in Figure 1.
+图1:The framework of the SF-Detector
+For incoming packet flow f, the system first consults the steady flow record table. If flow
+f already has an entry, its current time window frequency is updated; otherwise, the packet is
+transferred to the counting Bloom filter for frequency observation. The counting Bloom filter
+records flow f's frequency within the current window, reflecting frequency changes by
+updating its counter. When flow f achieves the defined stability threshold in frequency across
+three consecutive time windows, the system marks it as a potential steady flow and stores it in
+the record table. At the conclusion of each time window, the system reports steady flow
+information based on the stability count threshold mechanism, clears expired flow records,
+and updates the state of the counting Bloom filter according to the new flow frequency.
+3.2 Steady Flow Record Table
+To address the challenge of traditional methods struggling to adapt to traffic
+fluctuations, this paper proposes a hash-table-based implementation of a steady-flow record
+table. By dynamically managing flow state information, it balances storage efficiency with
+detection accuracy. This design avoids complex variance calculations by recording each
+flow's maximum and minimum values, while introducing a steady-count metric to track the
+flow's sustained stability. For storage management, a hierarchical strategy is employed: newly
+identified potentially steady flows are prioritised for storage in idle cells. When space
+becomes insufficient, replacement is performed based on steady-count, ensuring both the
+VII
+retention of important flows and the dynamic scalability of the table structure. The stability
+determination phase employs a progressive validation mechanism with multiple thresholds (β
+and Γ), effectively distinguishing transient high-volume flows from genuinely steady ones.
+This design achieves precise capture of steady flows within finite storage constraints through
+continuous flow state tracking and incremental stability verification. It resolves the accuracy
+degradation issues faced by traditional methods during sudden traffic fluctuations. The data
+structure of the steady flow record table is illustrated in Figure 2.
+Figure2. Data Structure of the Steady flow Record Table
+The steady flow record table is implemented as a hash table, utilising a hash function h(·).
+This structure comprises M buckets: A[1], A[2], A[3], ..., A[M], with each bucket containing
+n storage units. Each storage unit records information about a flow, including the flow
+identifier (Flow ID), current frequency (Fcur), maximum value (Max-val), minimum value
+(Min-val), and number of steady windows (StabilityCount). To conserve memory space, the
+flow identifier records only the fingerprint value generated from the quintuple (source IP
+address, destination IP address, source port, destination port, and protocol type). Fcur denotes
+the current occurrence frequency of the flow within the time window, Max-val represents the
+maximum occurrence frequency of the flow across all recorded windows, Min-val indicates
+the minimum occurrence frequency across all recorded windows, and Steady-count identifies
+the number of consecutive windows in which the flow has satisfied the stability condition.
+Initialisation phase:In the initial state, all fields are set to 0 or NULL.
+Packet Processing Flow:For incoming packets from stream f, the system first consults the
+steady stream record table for that stream. If stream f is already present in the records, its
+current time window frequency count (Fcur) is incremented by one. If stream f is not found in
+the record table, the packet is transferred to the discontinuous filter for initial assessment of
+its potential as a steady stream.
+Insertion Process for Potentially steady Flows:If stream f is determined to be a potentially
+steady stream, the following actions must be performed:
+Retrieve an available storage cell from bucket A[h(f)] in the steady stream record table
+and store stream f therein. At this point, two scenarios may arise:
+Case1:Barrel A[h(f)] contains an idle cell. At this point, stream f is inserted into this idle
+cell. The specific operation is as follows: Set the Flow ID to f, Set Fcur to 0, Set the values for
+Max-val and Min-val as provided by the counting Bloom filter, and set steady-count to 0.
+Case2:When Bucket A[h(f)] has no free slots, filter out all flows with the smallest
+VIII
+steady-state counts in the current bucket and replace them sequentially, overwriting the
+information of the flow with the smallest steady-state count with flow f's information.
+steady Stream Reporting Mechanism:At the conclusion of each time window, we traverse
+every cell within the steady stream record table to report the current steady stream. For each
+non-empty cell, we verify whether the maximum value Max-val and minimum value Min-val
+satisfy the steady stream discrimination formula under tolerance β, and whether the
+steady-count reaches the time window threshold β.
+Case1:if not satisfied Max-val ≤1+β
+Max−val+Min−val
+2
+and Min-val≥1−β
+Max−val+Min−val
+2
+，
+then the flow within that cell ceases to be steady, and we reset all fields within that cell.
+Case2:if steady-count<Γ but Max-val ≤1+β
+Max−val+Min−val
+2
+and Min-val≥1−β
+Max−val+Min−val
+2
+，
+the flow within that cell remains a potential steady flow; we do not report this flow. We
+increment the steady-count by one and simultaneously reset the flow frequency Fcur within
+that cell.
+Case3:If steady-count > Γ, the flow within that cell is confirmed as steady flow, the flow
+within that cell is reported, and finally the flow frequency within that cell is reset.
+Running example:Figure 2 illustrates an operational example of the steady stream record
+table. Assuming tolerance parameter β = 0.2, steady stream stability threshold Γ = 3, and
+current time window index Wcur = 2, the insertion of f1, f2, and f4 can be described as
+follows:
+1) For f1 identified as a potential steady flow, locate an idle cell within bucket A[h(f1)] and
+insert it.
+2) For f2 already present in the steady stream record table, upon locating it in bucket A[h(f2)],
+insert it directly. When this time window concludes, we update the maximum and minimum
+values and determine that it is no longer steady. Consequently, we reset all fields within that
+cell.
+3)For f4 already present in the steady-state flow record table, upon locating it in bucket
+A[h(f4)], insert it directly. When this time window concludes, we update the maximum and
+minimum values and increment steady-count by one following verification. Should
+steady-count exceed three, the flow within this cell is confirmed as steady-state flow, and the
+flow within this cell is reported. Finally, reset the flow frequency Fcur within this cell.
+3.3Non-continuous flow filter
+The discontinuous stream filter designed herein employs a triple-counting Bloom filter
+architecture, achieving efficient stream frequency detection through a rolling time-window
+update mechanism. Three parallel counting Bloom filters respectively record stream arrival
+frequencies across distinct time intervals. This design enables accurate tracking of frequency
+variation patterns within consecutive time windows, all within a fixed storage footprint.
+Through periodic rolling updates, the system perpetually monitors flow frequencies across the
+most recent three time windows, thereby avoiding historical data accumulation while ensuring
+detection timeliness. Upon new flow arrival, the system updates the flow's counter within the
+current window's counting Bloom filter—an operation exhibiting O(1) time complexity.
+During window transitions, counter maintenance is substantially reduced via simple bit array
+IX
+rotation updates. The determination phase employs a joint query across corresponding
+positions in the three filters to rapidly identify persistently active and steady streams. The
+false positive rate can be controlled by adjusting parameters of the counting Bloom filter. This
+design effectively resolves the memory consumption and accuracy issues faced by traditional
+Bloom filter methods when detecting stream continuity, particularly the limitations
+encountered during frequency fluctuations. Employing a space-for-time trade-off strategy, it
+achieves precise screening of potentially steady streams within finite resources, providing
+high-quality data input for subsequent stability determination. The data structure for the
+discontinuous stream filter is illustrated in Figure 3.
+Figure3. Non-continuous flow filter structure
+The discontinuous flow filter comprises three arrays BF1, BF2, and BF3, each containing
+w counters. These are respectively associated with k mutually independent hash functions
+H₁(.), H₂(.), H₃(.) … Hₖ(.), with the counters recording the arrival frequency of the flow within
+each time window. BF1 records the frequency of stream occurrences in the earliest time
+window, BF2 tracks occurrences in intermediate windows, while BF3 monitors the current
+window's frequency in real time. At each window's conclusion, the system performs a rolling
+update: BF1 initialises and logs stream activity for the latest window, updating its counter
+value. BF2 and BF3 track changes in stream frequency based on counter values,
+implementing overflow handling when required. Stream stability is determined by counter
+values rather than bit states; if a counter value exceeds a predetermined threshold, the stream
+is deemed steady.
+初始状态:We set all bits in BF1, BF2, and BF3 to zero.
+数据包处理:When the system receives a new stream f not yet recorded in the steady
+stream record table, it first maps f through k independent hash functions H1(f)... Hk(f) to map
+it to k specific positions BF3[Hi(f)] within BF3 (where 0 ≤H1(f) ≤w-1, 1 ≤i ≤k),
+incrementing the counter values at these positions by 1 to record stream f's arrival frequency
+X
+within the current time window. Upon time window switching, the system performs rolling
+updates: BF1 records stream activity for the latest time window, BF2 records frequencies for
+streams in the earliest time window, and BF3 records frequencies for streams in intermediate
+time windows. For streams under detection, the system concurrently queries the counter
+values at corresponding hash positions across the three counting Bloom filters. Stream
+stability is determined based on the following two scenarios:
+Case 1:If the counter values of BF1[Hi(f)], BF2[Hi(f)], and BF3[Hi(f)] (where 0 ≤H1(f)
+≤w-1 and 1 ≤i ≤k) are all non-zero and satisfy the steady flow condition, then flow f is
+deemed to have arrived continuously over three consecutive time windows and is transferred
+to the steady flow record table.
+Case 2:If one or more of the counter values BF1[Hi(f)], BF2[Hi(f)], BF3[Hi(f)] (where 0
+≤H1(f) ≤w-1 and 1 ≤i ≤k) is zero or fails to satisfy the steady flow condition, then flow f is
+deemed unsteady and shall be filtered.
+运行示例: Figure 3 illustrates an operational example of a discontinuous-flow filter. It is
+assumed that a counting Bloom filter corresponds to three hash functions. The insertion of
+streams f1 and f3 is described as follows:
+1）When inserting packet f1: We obtain its mapping bit in the identifier section via a hash
+operation and increment the counter for these bits in the counting Bloom filter BF3[Hi(f1)].
+During time window switching, the system checks the counter values of BF1[Hi(f1)],
+BF2[Hi(f1)], and BF3[Hi(f1)]. If the counter values at all three positions are greater than zero
+and satisfy the defined steady stream conditions, the stream f1 is deemed a potential steady
+stream and added to the steady stream record table.
+2）When inserting packet f3: We obtain its mapping bit in the identifier section via a hash
+operation, and increment the counters for these bits in the counting Bloom filter BF3[Hi(f3)].
+During time window switching, the system examines the counter values at BF1[Hi(f3)],
+BF2[Hi(f3)], and BF3[Hi(f3)]. Should the counter values at these positions not be entirely
+non-zero, or fail to meet steady stream criteria (such as excessive frequency fluctuations), the
+stream f3 is deemed unsteady and filtered out.
+3.4 Theoretical analysis
+3.4.1 Error limits for non-continuous flow filters
+For a single Bloom filter BFi, assuming it comprises w bits and utilises k independent hash
+functions, the false positive probability following the insertion of n stream elements within a
+time window is:
+Psingle=(1−e−kn
+w)k
+Theorem 1: Total error rate of a triple Bloom filter system
+Let three Bloom filters BF₁, BF₂, and BF₃ correspond to the flow state across three
+consecutive time windows. Since continuity assessment requires the flow to exist in all three
+XI
+windows and the filters operate independently, the overall false positive probability is:
+Ptotal=(1−e−kn
+w)3k
+Proof: Let event A_i denote a false positive query occurring in the i-th Bloom filter (i=1,2,3)
+for stream f. Three Bloom filters BF₁, BF₂, BF₃ independently maintain stream states across
+different time windows, with query results from each filter being mutually independent.The
+continuity determination rule requires:
+BF1[Hi(f)]∧BF2[Hi(f)]∧BF3[Hi(f)]=1，∀j∈1,k
+According to the multiplication rule for independent events:
+Ptotal=P A1∩A2∩A3 =P A1 ×P A2 ×P A3
+As the three filters share identical configurations, therefore:
+P A1 =P A2 =P A3 =Psingle=(1−e−kn
+w)k
+Therefore:
+Ptotal=Psingle
+3
+=
+1−e−kn
+w
+k 3
+=(1−e−kn
+w)3k
+3.4.2 Error Boundaries for Steady-Flow Records Table
+For a single steady record table (SRT): Assuming it comprises M buckets, each
+containing n storage units, and employing a hash function h(·), the probability of hash
+collisions after inserting K streams within a time window is:
+Pcollision=1−
+i=0
+K−1
+1−
+i
+M×n
+ෑ
+Theorem 2: Total Error Rate of steady Flow Recording Tables
+Let the steady-flow recording table (SRT) employ a replacement strategy based on
+steady-count. Given that stability determination requires the flow to satisfy stability
+conditions across consecutive time windows, and considering the presence of hash collisions
+and replacement errors, the total misclassification probability is:
+Ptotal=Pcollision+Preplacement+Pstability
+Ptotal denotes the error arising from hash collisions, Preplacement denotes the error arising
+XII
+from replacement strategies, and Pstability denotes the error arising from stability
+assessments.
+Proof: Let event A1 denote the occurrence of a hash collision in stream f, event A2 denote the
+erroneous replacement of stream f, and event A3 denote an erroneous stability determination
+of stream f.
+Hash collision error: When all n units in bucket A[h(f)] are occupied, the new stream f
+cannot be inserted, resulting in a hash collision. Under the approximation of the birthday
+paradox:
+Pcollision≈1−e−K2
+2Mn
+Replacement error: When a hash collision occurs, the system selects the stream with the
+smallest steady-count for replacement. Let the steady-count distribution of streams in the
+bucket be {s1, s2, ..., sn}. The probability of replacing a genuinely steady stream is:
+Preplacement= 桶中具有最小Steady-Count 的数量
+n
+Stability determination error: Due to the use of Max-val and Min-val for stability
+assessment, misjudgements may occur when flow rates exhibit random fluctuations.
+Assuming the true frequency distribution of flow follows a normal distribution N(σ², α), the
+probability of misjudgement under tolerance β is:
+Pstability=P
+Max_val−Min_val
+Max_val
+>α∣流实际稳定
+Total error margin: Based on probability theory, considering the relative independence of
+the three error sources:
+Ptotal≈Pcollision+Preplacement+Pstability
+That is:
+Ptotal≈1−e−K2
+2Mn+ 误替换概率
+n
++Pstability_misjudge
+4 Experiments
+XIII
+4.1 Experimental Setup
+(1) Data
+CAIDA2022: This experiment utilises the network trace dataset collected by the
+University of California, San Diego (UCSD). The dataset comprises anonymised network
+traffic data gathered from 13 August 2022 onwards, providing rich traffic characteristics
+including packet counts, source ASNs (Autonomous System Numbers), geolocation
+information, scanner type identifiers, and more. The dataset is stored in JSON format, with
+each
+record
+containing
+fields
+such
+as
+PacketCnt,
+SrcASN,
+NetacqCountry,
+and
+MaxmindCountry, providing comprehensive foundational data for network traffic analysis
+and anomaly detection.
+CAIDA 2020: The information collected is similar to CAIDA 2022, differing only in that
+this IP tracking dataset was collected by CAIDA in 2020.
+MAWI Dataset: The MAWI dataset is collected from daily traces on the transit links
+from WIDE to upstream ISPs.
+In our experiments, we employed the source ASN (SrcASN) as the flow identifier,
+processing packets in chronological order. The dataset comprises 168 time windows, each
+corresponding to one hour of data collection. We extracted 100,000 packet records for
+experimentation, dividing the data evenly across multiple time windows for analysis. Each
+time window contains approximately 1,500 packets.
+(2) Implementation
+Given the scarcity of existing research on identifying steady flows within data streams,
+we first compare the proposed SF-Detector with SteadySketch. Subsequently, to further
+validate its superiority, we designed two additional solutions based on SteadySketch, drawing
+upon classical stream processing principles, for comprehensive comparison.
+We implemented multiple steady flow detection algorithms, including GroundTruth,
+SteadySketch,
+SF-Detector,
+Strawman,
+SteadySketchLite,
+and
+SteadySketchEnhanced,
+integrating them into a single C++ programme. For the SteadySketch algorithm, we set its
+RBF (Rolling Bloom Filter) memory usage ratio to 0.5 of its total memory size. Its
+GroupSketch comprises three arrays, with the number of slots determined by the given
+memory size. For the SF-Detector algorithm, we set the size of its counting Bloom filter to
+4096 counters. The steady stream record table comprises 1024 buckets, each storing 4 stream
+entries. For the Strawman algorithm, we configure its Count-Min Sketch to contain 3 arrays,
+with the number of slots in each array determined by the allocated memory size. For the
+SteadySketchLite algorithm, we employed a relaxed stability threshold (20, compared to 10 in
+the original algorithm) and reduced the alpha value to decrease memory usage. For the
+SteadySketchEnhanced algorithm, we applied a strict stability threshold (5) and increased the
+number of backup and test arrays to enhance detection accuracy, albeit at the cost of higher
+memory overhead. Furthermore, we set the time window size to 1,500 packets. Subsequently,
+we ran the programmes on a server configured with an Intel Core i7 processor and 16GB of
+memory to evaluate their performance in steady flow detection. The experimental data
+comprised 100,000 packets and 67 time windows, enabling a comprehensive assessment of
+each algorithm's detection accuracy, recall, F1 score, throughput, and memory efficiency.
+(3) Metrics
+Precision Rate (PR): The ratio of correctly reported steady flows to the total number of
+XIV
+reported steady flows.
+Recall Rate (RR): The ratio of correctly reported steady flows to the actual number of
+steady flows.
+F1 Score: The F1 score is the harmonic mean of recall and precision, serving as a
+measure of the overall performance of emerging stream detection methods.
+Memory Usage: We evaluate the memory efficiency of each algorithm through detailed
+memory usage analysis.
+Throughput: We measure throughput using MIPS (Million Instructions Per Second).
+5.2 Parameter Settings
+We conducted a comprehensive evaluation of SF-Detector's key parameters, including
+the number of hash functions k, the steady flow fluctuation tolerance threshold β, and the
+steady flow continuous time window threshold γ. In our experiments, we configured the
+counting Bloom filter for the discontinuous flow filter to three elements, with a time window
+size of 1,500 packets. Experiments were conducted on the CAIDA2022 dataset, and the
+impact of parameters was evaluated using F1 scores.
+图(a)
+Effects of k：Figure (a) indicates that experimental results demonstrate the optimal value
+of k is 3. As allocated memory increases, the F1 score, recall, and precision for all k values
+exhibit an upward trend, reaching saturation once a certain memory threshold is attained.
+Specifically, when k=1, the algorithm's performance is relatively low, with the F1 score
+peaking at approximately 0.91. Performance improves significantly as k increases. At k=2, the
+F1 score peaks at 0.975. When k=3, the algorithm demonstrates optimal overall performance,
+with the F1 score exceeding 0.97 at 45KB of allocated memory and stabilising around 0.98 at
+higher memory allocations, achieving over 97%. When k is further increased to k=4 and k=5,
+the F1 score remains very close to that of k=3, even showing slight declines or remaining flat,
+without yielding significant performance gains. This indicates that beyond k=3, increasing the
+number of hash functions diminishes the marginal benefit to the F1 score. It may even cause
+slight performance fluctuations due to hash collisions or increased computational overhead. In
+summary, within our experimental framework, setting the number of hash functions k to 3
+represents the optimal choice. This configuration ensures high detection performance while
+avoiding unnecessary computational complexity and resource consumption.
+XV
+图(b)
+Effects of β :Figure (b) indicates that the choice of β significantly impacts the F1 score.
+When memory increases from 15KB to 75KB, the F1 score for all β values initially rises
+before levelling off, demonstrating that increased memory enhances performance but exhibits
+diminishing marginal returns. Specifically, the algorithm exhibits optimal overall performance
+when β is set to 0.2. At this setting, the F1 score reaches 0.97 when memory reaches 55KB
+and remains around 0.975 at higher memory levels. This indicates that β=0.2 achieves a
+favourable balance between recall and precision. In contrast, excessively small or large β
+values yield comparatively lower F1 scores. A β=0.1 may prove overly restrictive, causing
+recall to decline; whereas β=0.4 or β=0.5 may capture more potential steady streams, leading
+to increased false positives. Even with higher recall, the resulting precision drop adversely
+affects the overall F1 score. β=0.3 performs between the optimal value and larger β values,
+achieving 0.96 under higher memory allocations, though still slightly below β=0.2. Therefore,
+considering all factors, β=0.2 is the optimal choice in this experiment, delivering steady and
+high performance across different memory allocations.
+图(c)
+Effects of γ :Figure (c) indicates that the choice of γ significantly impacts the F1 score.
+When memory increases from 15KB to 75KB, the F1 score for all γ values initially rises
+before levelling off, demonstrating that increased memory enhances performance but exhibits
+diminishing marginal returns. Specifically, when γ is set to 3, the algorithm exhibits optimal
+overall performance. At this setting, the F1 score reaches 0.97 when memory reaches 55KB
+and remains around 0.985 at higher memory levels, exceeding 98% of the target. This
+indicates that when streams remain active for three consecutive time windows, the algorithm
+more accurately identifies steady streams, achieving a favourable balance between recall and
+precision. In contrast, γ=2 and γ=4 yield secondary performance, with F1 score curves
+approximating γ=3's but falling slightly below the optimum. This indicates that slight
+deviations from the optimal γ value cause minor performance declines. For instance, γ=2 may
+XVI
+lead to premature identification of unsteady streams, while γ=4 may result in delayed or
+missed detection of genuinely steady streams. The performance of γ=1 and γ=5 is
+comparatively poor. γ=1 deems a stream steady after just one active time window, introducing
+numerous false positives that significantly reduce precision and yield the lowest F1 score.
+Conversely, γ=5 is overly stringent, requiring streams to remain active for five consecutive
+time windows. This causes many genuinely steady streams to be missed due to brief
+fluctuations, thereby reducing recall and yielding a lower F1 score. Therefore, after
+comprehensive consideration, setting the threshold γ for the number of consecutive time
+windows for steady streams to 3 is the optimal choice. It delivers the highest F1 score across
+different memory allocations, effectively balancing recall and precision to achieve the best
+overall performance for steady stream detection methods.
+5.3. 实验结果
+在本节中，我们基于三个真实数据集开展了广泛实验，并通过四项性能指标（PR、
+RR、F1 得分和吞吐量）评估SF-Detector 的性能。实验结果表明，SF-Detector 能在有限
+内存条件下准确检测稳定流。
+Precision Rate: Based on the precision rate analysis across three datasets (CAIDA2020,
+CAIDA2022, and MAWI), SF-Detector demonstrates superior performance with precision
+rates consistently exceeding 0.7 and reaching up to 0.95, significantly outperforming all other
+methods. SteadySketchEnhanced ranks second with PR values between 0.65-0.85, while
+SteadySketch and SteadySketchLite show moderate performance in the 0.4-0.75 range. The
+Strawman baseline exhibits the lowest precision rates (0.3-0.65) across all scenarios. Notably,
+all methods show positive correlation between memory allocation and precision rate, with
+performance improvements as memory increases from 10KB to 80KB. The consistent
+performance ranking across all three datasets validates the robustness of SF-Detector's design
+in minimizing false positives while maintaining high detection accuracy in diverse network
+traffic environments.
+(a) CAIDA2020
+(b) CAIDA2022
+XVII
+(c) MAWI
+Recall Rate: Based on the recall rate analysis across three datasets (CAIDA2020,
+CAIDA2022, and MAWI), SF-Detector achieves exceptional performance with recall rates
+consistently between 0.75-1.0, demonstrating superior capability in detecting true super
+spreaders
+with
+minimal
+false
+negatives.
+SteadySketchEnhanced
+shows
+competitive
+performance
+with
+RR
+values
+ranging
+from
+0.65-0.85,
+while
+SteadySketch
+and
+SteadySketchLite exhibit moderate recall rates in the 0.4-0.8 range. The Strawman baseline
+demonstrates the lowest recall performance (0.35-0.7) across all scenarios. All methods show
+strong positive
+correlation
+between
+memory
+size
+and recall
+rate, with
+significant
+improvements as memory increases from 10KB to 80KB, indicating that larger memory
+allocations enable more comprehensive detection coverage. The consistent performance
+hierarchy across all three datasets confirms SF-Detector's robustness in maximizing detection
+completeness while minimizing missed super spreaders in various network traffic conditions.
+(a) CAIDA2020
+(b) CAIDA2022
+XVIII
+(c) MAWI
+F1 Score: Based on the F1 score analysis across three datasets (CAIDA2020,
+CAIDA2022, and MAWI), SF-Detector achieves outstanding overall performance with F1
+scores consistently ranging from 0.7-1.0, demonstrating optimal balance between precision
+and recall in super spreader detection. SteadySketchEnhanced ranks second with F1 scores
+between 0.55-0.82, showing reasonable trade-offs between false positives and false negatives.
+SteadySketch and SteadySketchLite exhibit moderate performance with F1 scores in the
+0.4-0.75 range, while the Strawman baseline shows the poorest performance (0.3-0.68) across
+all scenarios. All methods display strong positive correlation between memory allocation and
+F1 scores, with substantial improvements as memory increases from 10KB to 80KB,
+indicating that increased memory enables better overall detection accuracy. The consistent
+performance ranking across all three datasets validates SF-Detector's superiority in achieving
+harmonious balance between detection completeness and accuracy, making it the most
+reliable solution for super spreader identification in diverse network environments.
+(a) CAIDA2020
+(b) CAIDA2022
+XIX
+(c) MAWI
+Throughput: Based on the throughput analysis across three datasets (CAIDA2020,
+CAIDA2022, and MAWI), SF-Detector maintains consistently high processing throughput of
+approximately 39-40 MIPS (million packets per second) across all memory sizes,
+demonstrating
+exceptional
+efficiency
+and
+scalability.
+SteadySketchEnhanced
+shows
+competitive throughput performance ranging from 24-37 MIPS, with notable improvements at
+larger memory allocations. SteadySketch, SteadySketchLite, and Strawman exhibit similar
+throughput patterns, ranging from 20-25 MIPS across different memory configurations, with
+slight variations depending on the dataset. Interestingly, throughput shows relatively stable
+performance across different memory sizes for most methods, with SteadySketchEnhanced
+being the exception that benefits more significantly from increased memory. The consistent
+high throughput of SF-Detector across all three datasets, while simultaneously achieving
+superior accuracy metrics, validates its efficiency in real-time network monitoring scenarios,
+making it highly suitable for high-speed network environments requiring both accuracy and
+performance.
+(a) CAIDA2020
+(b) CAIDA2022
+XX
+(c) MAWI
+References
+[1] Xiong B, Liu Y, Liu R, et al. ActiveGuardian: An accurate and efficient algorithm for
+identifying active elephant flows in network traffic[J]. Journal of Network and Computer
+Applications, 2024, 224: 103853.
+[2] Xiong B, Chang Y, Zhang Y, et al. AF-Detector: An accurate low-overhead method for
+detecting active flows in network traffic[J]. Computer Networks, 2025: 111562.
+[3] 熊兵, 刘永青, 夏卓群, 等. RobustSketch: 支持网络流量抖动的大流弹性识别方法[J].
+软件学报, 2024, 36(2): 660-679.
+[4] Roy P, Khan A, Alonso G. Augmented sketch: Faster and more accurate stream
+processing[C]//Proceedings of the 2016 International Conference on Management of Data.
+2016: 1449-1463.
+[5] Yang T, Jiang J, Liu P, et al. Elastic sketch: Adaptive and fast network-wide
+measurements[C]//Proceedings of the 2018 Conference of the ACM Special Interest Group on
+Data Communication. 2018: 561-575.
+[6] Zhou Y, Yang T, Jiang J, et al. Cold filter: A meta-framework for faster and more accurate
+stream processing[C]//Proceedings of the 2018 International Conference on Management of
+Data. 2018: 741-756.
+[7] Yang T, Zhang H, Li J, et al. HeavyKeeper: an accurate algorithm for finding Top-$ k
+$ elephant flows[J]. IEEE/ACM Transactions on Networking, 2019, 27(5): 1845-1858.
+[8] Tang L, Huang Q, Lee P P C. Mv-sketch: A fast and compact invertible sketch for heavy
+flow detection in network data streams[C]//IEEE INFOCOM 2019-IEEE Conference on
+Computer Communications. IEEE, 2019: 2026-2034.
+[9] Cormode G, Muthukrishnan S. An improved data stream summary: the count-min sketch
+and its applications[J]. Journal of Algorithms, 2005, 55(1): 58-75.
+XXI
+[10] Alcantara A, Galvan I M, Aler R. Deep neural networks for the quantile estimation of
+regional renewable energy production[J]. Applied Intelligence, 2023, 53(7): 8318-8353.
+[11] Gu Y, McCallum A, Towsley D. Detecting anomalies in network traffic using maximum
+entropy estimation[C]//Proceedings of the 5th ACM SIGCOMM conference on Internet
+Measurement. 2005: 32-32.
+[12] Gou X, He L, Zhang Y, et al. Sliding sketches: A framework using time zones for data
+stream processing in sliding windows[C]//Proceedings of the 26th ACM SIGKDD
+International Conference on Knowledge Discovery & Data Mining. 2020: 1015-1025.
+[13] Liu Z, Kong C, Yang K, et al. Hypercalm sketch: One-pass mining periodic batches in
+data streams[C]//2023 IEEE 39th International Conference on Data Engineering (ICDE).
+IEEE, 2023: 14-26.
+[14] Li X, Fan Z, Li H, et al. SteadySketch: Finding steady flows in data streams[C]//2023
+IEEE/ACM 31st International Symposium on Quality of Service (IWQoS). IEEE, 2023:
+01-09.
+[15] Zhong Z, Yan S, Li Z, et al. Burstsketch: Finding bursts in data streams[C]//Proceedings
+of the 2021 International Conference on Management of Data. 2021: 2375-2383.
+[16] Fan
+Z,
+Hu
+Z,
+Wu
+Y,
+et
+al.
+Pisketch:
+finding
+persistent
+and
+infrequent
+flows[C]//Proceedings of the ACM SIGCOMM Workshop on Formal Foundations and
+Security of Programmable Network Infrastructures. 2022: 8-14.
+[17] Hermsmeyer C, Song H, Schlenk R, et al. Towards 100G packet processing: Challenges
+and technologies[J]. Bell Labs Technical Journal, 2009, 14(2): 57-79.
+[18] Luo L, Guo D, Ma R T B, et al. Optimizing bloom filter: Challenges, solutions, and
+comparisons[J]. IEEE Communications Surveys & Tutorials, 2018, 21(2): 1912-1949.
+[19] Zhang Y, Li J, Lei Y, et al. On-off sketch: A fast and accurate sketch on persistence[J].
+Proceedings of the VLDB Endowment, 2020, 14(2): 128-140.
