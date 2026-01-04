@@ -141,7 +141,13 @@ The filter part employs a triple-counting Bloom filter architecture to track flo
     \item \textbf{Case 2:} If one or more of the counter values is zero or fails to satisfy the stability condition, then flow $f$ is deemed non-continuous and shall be filtered out.
 \end{itemize}
 
-\textbf{Rolling updates:} Upon time window switching, the system performs rolling updates: $BF_1$ is cleared and takes the role of recording the new current window, $BF_2$ takes the values from the previous $BF_1$, and $BF_3$ takes the values from the previous $BF_2$. This mechanism ensures efficient memory utilization with $O(1)$ time complexity.
+\textbf{Rolling updates:} Upon time window switching, the system performs rolling updates: $BF_1$ is cleared and takes the role of recording the new current window, $BF_2$ takes the values from the previous $BF_1$, and $BF_3$ takes the values from the previous $BF_2$. This mechanism ensures efficient memory utilization with $O(1)$ time complexity. As shown in Figure \ref{fig:rolling_update}, the three Bloom filters rotate cyclically like a drum, where the oldest section is cleared and becomes the new current window.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=2.5in]{Rolling update mechanism of the triple-counting Bloom filters.jpg}}
+\caption{Rolling update mechanism of the triple-counting Bloom filters.}
+\label{fig:rolling_update}
+\end{figure}
 
 \textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filter part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The identification of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
 
