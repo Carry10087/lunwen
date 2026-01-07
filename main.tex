@@ -1,39 +1,47 @@
-\documentclass[conference]{IEEEtran}
-\usepackage{cite}
+\documentclass[preprint,12pt]{elsarticle}
+
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
-\usepackage{booktabs} % For better tables
-\usepackage{algorithm} % For algorithm blocks
+\usepackage{booktabs}
+\usepackage{algorithm}
 \usepackage{url}
-\usepackage{float} % For [H] placement
+\usepackage{float}
+\usepackage{lineno}
+\usepackage{hyperref}
 
 % Define theorems
 \newtheorem{theorem}{Theorem}
 \newtheorem{definition}{Definition}
 
+\journal{Computer Networks}
+
 \begin{document}
+
+\begin{frontmatter}
 
 \title{SF-Detector: An Efficient and Accurate Method for Detecting Steady Flows in Network Traffic}
 
-% Author placeholder - Update with actual author info if needed
-\author{\IEEEauthorblockN{Chen Zhenxing}
-\IEEEauthorblockA{\textit{Changsha University of Science and Technology} \\
-Changsha, China \\
-Email: [1006503012@qq.com]}
-}
+\author[csust]{Zhenxing Chen}
+\ead{1006503012@qq.com}
 
-\maketitle
+\affiliation[csust]{organization={School of Computer and Communication Engineering, Changsha University of Science and Technology},
+            city={Changsha},
+            country={China}}
 
 \begin{abstract}
 Steady flows refer to packet flows whose packet arrival rates remain relatively steady across multiple consecutive time windows. Such packet flows may indicate network security threats like DDoS attacks, and also reflect sustained network traffic demands useful for resource planning and cache optimization. Previous work requires storing per-flow information across multiple time windows to track flow stability, resulting in high memory overhead and low throughput. To address these issues, we propose an efficient and accurate method for detecting steady flows in network traffic called SF-Detector, which separates the filtering and recording functions of packet flows, enabling efficient detection and reporting of steady flows. In particular, SF-Detector consists of a filtering part that employs multi-window counting Bloom filters to remove non-continuous flows, and a recording part that adopts a hash table to track and verify steady flows. As for the recording part, we design a stability determination method based on the ratio of maximum to minimum arrival frequencies across consecutive time windows. If this ratio stays within a tolerance threshold, the flow is considered steady. This simple comparison avoids complex variance calculations, reducing computational overhead. Additionally, we devise a flow entry replacement mechanism for the record table. When the table is full, the entry with the smallest steady-count is replaced, ensuring efficient memory utilization. Finally, we evaluate SF-Detector through theoretical analysis and experiments on real network traces (CAIDA2020, CAIDA2022, MAWI). Compared to state-of-the-art methods, SF-Detector improves precision by up to 20\%, achieving over 95\% precision, nearly 100\% recall, and 40 MIPS throughput.
 \end{abstract}
 
-\begin{IEEEkeywords}
-Network Measurement, Steady Flows, Sketch Algorithms, Bloom Filter, Traffic Analysis.
-\end{IEEEkeywords}
+\begin{keyword}
+Network Measurement \sep Steady Flows \sep Sketch Algorithms \sep Bloom Filter \sep Traffic Analysis
+\end{keyword}
+
+\end{frontmatter}
+
+%\linenumbers
 
 \section{Introduction}
 Network measurement plays a vital role in the traffic engineering and network security management of large-scale dynamic network traffic \cite{b1}-\cite{b5}. It provides critical information such as traffic volume statistics, flow distributions, and anomaly patterns for applications including network optimization, security monitoring, and resource allocation. These applications demand high measurement accuracy to ensure reliable decision-making. However, it is impractical to store all data due to the high speed and massive scale of modern network traffic, forcing measurement to rely on sampling or approximation techniques rather than exact recording. This makes achieving both high-precision and high-overhead network measurement particularly challenging.
@@ -114,7 +122,7 @@ Considering that non-continuous flows account for the majority of packet flows i
 
 \begin{figure}[htbp]
 \centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{The framework of the SF-Detector.png}}
-\caption{The framework of the SF-Detector. It consists of a Filter part and a Record part.}
+\caption{The framework of the SF-Detector.}
 \label{fig:framework}
 \end{figure}
 
@@ -126,9 +134,9 @@ The filter part employs a triple-counting Bloom filter architecture to track flo
 \textbf{The data structure of the filter part:} As shown in Figure \ref{fig:filter}, the filter part comprises three arrays $BF_1$, $BF_2$, and $BF_3$, each containing $w$ counters. These are respectively associated with $k$ mutually independent hash functions $H_1(\cdot), H_2(\cdot), ..., H_k(\cdot)$, with the counters recording the arrival frequency of the flow within each time window. $BF_1$ records the frequency of flow occurrences in the earliest time window, $BF_2$ tracks occurrences in intermediate windows, while $BF_3$ monitors the current window's frequency in real time.
 
 \begin{figure}[htbp]
-\centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{Non-continuous flow filter structure.png}}
-\caption{Non-continuous flow filter structure with rolling updates.}
-\label{fig:filter}
+\centerline{\includegraphics[width=2.5in]{Rolling update mechanism of the triple-counting Bloom filters.jpg}}
+\caption{Rolling update mechanism of the triple-counting Bloom filters.}
+\label{fig:rolling_update}
 \end{figure}
 
 \textbf{Initialization:} In initial state, we set all counters in $BF_1$, $BF_2$, and $BF_3$ to zero.
@@ -141,12 +149,12 @@ The filter part employs a triple-counting Bloom filter architecture to track flo
     \item \textbf{Case 2:} If one or more of the counter values is zero or fails to satisfy the stability condition, then flow $f$ is deemed non-continuous and shall be filtered out.
 \end{itemize}
 
-\textbf{Rolling updates:} Upon time window switching, the system performs rolling updates: $BF_1$ is cleared and takes the role of recording the new current window, $BF_2$ takes the values from the previous $BF_1$, and $BF_3$ takes the values from the previous $BF_2$. This mechanism ensures efficient memory utilization with $O(1)$ time complexity. As shown in Figure \ref{fig:rolling_update}, the three Bloom filters rotate cyclically like a drum, where the oldest section is cleared and becomes the new current window.
+\textbf{Rolling updates:} Upon time window switching, the system performs rolling updates: $BF_1$ is cleared and takes the role of recording the new current window, $BF_2$ takes the values from the previous $BF_1$, and $BF_3$ takes the values from the previous $BF_2$. This mechanism ensures efficient memory utilization with $O(1)$ time complexity. As shown in Figure \ref{fig:filter}, the three Bloom filters rotate cyclically like a drum, where the oldest section is cleared and becomes the new current window.
 
 \begin{figure}[htbp]
-\centerline{\includegraphics[width=2.5in]{Rolling update mechanism of the triple-counting Bloom filters.jpg}}
-\caption{Rolling update mechanism of the triple-counting Bloom filters.}
-\label{fig:rolling_update}
+\centerline{\includegraphics[width=2.5in, trim=10 10 10 10, clip]{Non-continuous flow filter structure.png}}
+\caption{Non-continuous flow filter structure with rolling updates.}
+\label{fig:filter}
 \end{figure}
 
 \textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filter part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The identification of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
@@ -366,33 +374,7 @@ In this section, we conduct extensive experiments on three real-world datasets a
 \section{Conclusion}
 In this paper, we proposed SF-Detector to efficiently and accurately detect steady flows. By separating filtering and recording, and using a simplified extreme-value-based stability check, SF-Detector overcomes the memory and speed limitations of previous work. Experiments show it improves precision by up to 20\% and maintains high throughput.
 
-\begin{thebibliography}{00}
-
-\bibitem{b1} Xiong B, Liu Y, Liu R, et al. ActiveGuardian: An accurate and efficient algorithm for identifying active elephant flows in network traffic[J]. Journal of Network and Computer Applications, 2024, 224: 103853.
-\bibitem{b2} Xiong B, Chang Y, Zhang Y, et al. AF-Detector: An accurate low-overhead method for detecting active flows in network traffic[J]. Computer Networks, 2025: 111562.
-\bibitem{b3} Xiong B, et al. RobustSketch: Robust Identification of Heavy Flows Supporting Traffic Jitter[J]. Journal of Software, 2024, 36(2): 660-679.
-\bibitem{b4} Roy P, Khan A, Alonso G. Augmented sketch: Faster and more accurate stream processing[C]//Proceedings of the 2016 International Conference on Management of Data. ACM, 2016: 1449-1463.
-\bibitem{b5} Yang T, Jiang J, Liu P, et al. Elastic sketch: Adaptive and fast network-wide measurements[C]//Proceedings of the 2018 Conference of the ACM Special Interest Group on Data Communication. ACM, 2018: 561-575.
-\bibitem{b6} Zhou Y, Yang T, Jiang J, et al. Cold filter: A meta-framework for faster and more accurate stream processing[C]//Proceedings of the 2018 International Conference on Management of Data. ACM, 2018: 741-756.
-\bibitem{b7} Xiao Q, Zhou Y, Chen S. Better with fewer bits: Improving the performance of cardinality estimation of large data streams[C]//IEEE INFOCOM 2017-IEEE Conference on Computer Communications. IEEE, 2017: 1-9.
-\bibitem{b8} Tang L, Huang Q, Lee P P C. MV-Sketch: A fast and compact invertible sketch for heavy flow detection in network data streams[C]//IEEE INFOCOM 2019. IEEE, 2019: 2026-2034.
-\bibitem{b9} Yang T, Zhang H, Li J, et al. HeavyKeeper: an accurate algorithm for finding Top-k elephant flows[J]. IEEE/ACM Transactions on Networking, 2019, 27(5): 1845-1858.
-\bibitem{b10} Epicoco I, Melle C, Cafaro M, et al. UDDSketch: Accurate tracking of quantiles in data streams[J]. IEEE Access, 2020, 8: 147604-147617.
-\bibitem{b11} Gu Y, McCallum A, Towsley D. Detecting anomalies in network traffic using maximum entropy estimation[C]//Proceedings of the 5th ACM SIGCOMM Conference on Internet Measurement. ACM, 2005: 32-32.
-\bibitem{b12} Gou X, He L, Zhang Y, et al. Sliding sketches: A framework using time zones for data stream processing in sliding windows[C]//Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining. ACM, 2020: 1015-1025.
-\bibitem{b13} Liu Z, Kong C, Yang K, et al. HyperCalm Sketch: One-pass mining periodic batches in data streams[C]//2023 IEEE 39th International Conference on Data Engineering. IEEE, 2023: 14-26.
-\bibitem{b14} Li X, Fan Z, Li H, et al. SteadySketch: Finding steady flows in data streams[C]//2023 IEEE/ACM 31st International Symposium on Quality of Service. IEEE, 2023: 1-9.
-\bibitem{b15} Zhong Z, Yan S, Li Z, et al. BurstSketch: Finding bursts in data streams[C]//Proceedings of the 2021 International Conference on Management of Data. ACM, 2021: 2375-2383.
-\bibitem{b16} Fan Z, Hu Z, Wu Y, et al. PISketch: Finding persistent and infrequent flows[C]//Proceedings of the ACM SIGCOMM Workshop on Formal Foundations and Security of Programmable Network Infrastructures. ACM, 2022: 8-14.
-\bibitem{b17} Bloom B H. Space/time trade-offs in hash coding with allowable errors[J]. Communications of the ACM, 1970, 13(7): 422-426.
-\bibitem{b18} Luo L, Guo D, Ma R T B, et al. Optimizing Bloom filter: Challenges, solutions, and comparisons[J]. IEEE Communications Surveys \& Tutorials, 2018, 21(2): 1912-1949.
-\bibitem{b19} Zhang Y, Li J, Lei Y, et al. On-Off Sketch: A fast and accurate sketch on persistence[J]. Proceedings of the VLDB Endowment, 2020, 14(2): 128-140.
-\bibitem{b20} Cormode G, Muthukrishnan S. An improved data stream summary: the count-min sketch and its applications[J]. Journal of Algorithms, 2005, 55(1): 58-75.
-\bibitem{b21} Charikar M, Chen K, Farach-Colton M. Finding frequent items in data streams[C]//Proceedings of the 29th International Colloquium on Automata, Languages and Programming. Springer, 2002: 693-703.
-\bibitem{b22} Yuan Z, Miao J, Jia Y, et al. Counting data stream based on improved counting Bloom filter[C]//2008 The Ninth International Conference on Web-Age Information Management. IEEE, 2008: 512-519.
-\bibitem{b23} The CAIDA UCSD Anonymized Internet Traces[EB/OL]. https://www.caida.org/catalog/datasets/passive\_dataset.
-\bibitem{b24} MAWI Working Group Traffic Archive[EB/OL]. https://mawi.wide.ad.jp/mawi/.
-
-\end{thebibliography}
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
 
 \end{document}
