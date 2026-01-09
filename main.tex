@@ -102,7 +102,7 @@ $h(\cdot)$ & the hash function used in the record table of SF-Detector \\
 \end{center}
 \end{table}
 
-\subsection{Relevant Work}
+\subsection{Related Work}
 Steady flow detection is a fundamental function of network traffic analysis. Previous frequency estimation methods are mostly designed based on probabilistic data structures, such as Count-Min Sketch \cite{b20} and Count Sketch \cite{b21}. Count-Min Sketch is composed of a $d \times w$ two-dimensional array and $d$ mutually independent hash functions. When a packet arrives, it maps the packet into $d$ counters by hashing and increments them by 1. As for the query of a flow, the minimum of its mapped counters is reported as its estimated frequency. However, Count-Min Sketch suffers from hash collisions, leading to overestimation of flow frequencies. Count Sketch is similar to Count-Min Sketch, but it incorporates an additional bool function to increment or decrement the mapped counters of a packet. As for the query of a flow, the median of its mapped counters is taken as its estimated frequency. However, Count Sketch requires more computational overhead due to the median calculation.
 
 Elastic Sketch \cite{b5} divided network traffic into elephant and mice flows, and separately stored them into heavy and light parts. It further compressed and merged data structures to reduce bandwidth usage while maintaining the accuracy of frequency estimation. However, Elastic Sketch focuses on separating large and small flows rather than tracking flow stability over time. Cold Filter \cite{b6} employed a two-stage filtering mechanism to separate hot and cold items, improving the accuracy of frequency estimation with low memory overhead. However, Cold Filter is designed for frequency estimation rather than stability detection. HeavyKeeper \cite{b9} adopted a count-with-exponential-decay strategy to find top-k elephant flows accurately. However, HeavyKeeper only identifies heavy hitters and cannot track the stability of flow arrival rates across consecutive time windows.
@@ -182,7 +182,7 @@ The record part employs a hash-table-based structure to precisely track and veri
 
 \textbf{The insertion of a potentially steady flow:} If the flow $f$ is identified as a potentially steady flow by the filter part, we need to look up the record part for an empty cell in bucket $A[h(f)]$ and place the flow $f$ into it. There are two cases:
 \begin{itemize}
-    \item \textbf{Case 1:} There is an empty cell in the bucket $A[h(f)]$. In this case, we insert the flow $f$ into the empty cell. Specifically, we set Flow ID as $f$, $F_{cur}$ as 0, $Max\_val$ and $Min\_val$ as the estimated frequency from the filter part, and $Steady\_count$ as 0.
+    \item \textbf{Case 1:} There is an empty cell in the bucket $A[h(f)]$. In this case, we insert the flow $f$ into the empty cell. Specifically, we set Flow ID as $f$, $F_{cur}$ as 0, $Max\_val$ as the maximum of the estimated frequencies across three windows from the filter part, $Min\_val$ as the minimum of these frequencies, and $Steady\_count$ as 0.
     \item \textbf{Case 2:} If there is no empty cell in the bucket $A[h(f)]$, we find the flow with the smallest $Steady\_count$ and replace it with the flow $f$. This replacement strategy ensures that flows with longer stability history are preserved.
 \end{itemize}
 
