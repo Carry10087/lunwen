@@ -140,7 +140,7 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
 
 \textbf{Initialization:} Initially, we set all counters in $CBF_1$, $CBF_2$, and $CBF_3$ to zero.
 
-\textbf{Packet processing:} For the arrived packet from the flow $f$, we first look up the flow $f$ in the recording part. If the flow $f$ is not found in the recording part, We maps the flow $f$ to the $k$ counters in $CBF_1$ using the $k$ independent hash functions $H_1(\cdot), \ldots, H_k(\cdot)$ and then increments these counters by 1.
+\textbf{Packet processing:} For the arrived packet from the flow $f$, we first look up the flow $f$ in the recording part. If the flow $f$ is not found in the recording part, We maps the flow $f$ to the $k$ counters in $CBF_1$ using the $k$ independent hash functions $H_1(\cdot), \ldots, H_k(\cdot)$ and increment these counters by 1.
 
 \textbf{The detection of potentially steady flows:} After the flow $f$ is inserted into the filter, we query the $k$ mapped counters of the flow $f$ in the three counting bloom filters. Then we take the minimum mapped counter in each filter as the estimated frequency of the flow $f$ in the time window to determine whether the flow $f$ is a potentially steady flow. There are two cases:
 \begin{itemize}
@@ -148,7 +148,7 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
     \item \textbf{Case 2:} If the estimated frequencies of flow $f$ do not satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we filter out the flow $f$. 
 \end{itemize}
 
-\textbf{Rolling updates:} At the end of each time window, we rotate the three counting bloom filters: the former $CBF_1$ and $CBF_2$ serve as $CBF_2$ and $CBF_3$, respectively, and $CBF_3$ is cleared and reused as $CBF_1$. 
+\textbf{Rolling updates:} At the end of each time window, we rotate the three counting bloom filters: the former $CBF_1$ and $CBF_2$ serve as $CBF_2$ and $CBF_3$, respectively, the $CBF_3$ is cleared and reused as $CBF_1$. 
 
 \textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filtering part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The detection of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
 
