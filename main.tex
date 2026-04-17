@@ -130,7 +130,7 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
 
 \subsection{Filtering Part}
 
-\textbf{The data structure of the filtering part:} As shown in Figure \ref{fig:filter}, the filtering part comprises three arrays, $CBF_1$, $CBF_2$, and $CBF_3$, each containing $w$ counters. The three arrays share a set of $k$ mutually independent hash functions, $H_1(\cdot), H_2(\cdot), ..., H_k(\cdot)$, which map each flow to $k$ counters in each array. These counters record the arrival frequency of each flow in the corresponding time window. Specifically, $CBF_1$ records the arrival frequency in the current time window, $CBF_2$ records that in the previous time window, and $CBF_3$ records that in the oldest of the three consecutive time windows.
+\textbf{Data structure:} The filtering part comprises three counting bloom filters, $CBF_1$, $CBF_2$, and $CBF_3$, each containing $w$ counters in Figure \ref{fig:filter}. The three filters share a set of $k$ mutually independent hash functions, $H_1(\cdot), H_2(\cdot), ..., H_k(\cdot)$, which map each flow to $k$ counters in each filter. These counters store the cumulative packet arrival counts for mapped flows. Specifically, $CBF_1$, $CBF_2$, and $CBF_3$ estimate the frequency of a flow in the current, previous, and oldest of the three consecutive time windows, respectively. 
 
 \begin{figure}[htbp]
 \centerline{\includegraphics[width=0.8\textwidth, trim=10 10 10 10, clip]{Non-continuous flow filtering structure.pdf}}
@@ -140,23 +140,23 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
 
 \textbf{Initialization:} Initially, we set all counters in $CBF_1$, $CBF_2$, and $CBF_3$ to zero.
 
-\textbf{Packet processing:} For an arriving packet from a flow $f$ not yet recorded in the recording part, the filtering part uses $k$ independent hash functions, $H_1(\cdot), ..., H_k(\cdot)$, to map $f$ to $k$ counters in $CBF_1$ and increments these counters by 1.
+\textbf{Packet processing:} For the arrived packet from the flow $f$, we first look up the flow $f$ in the recording part. If the flow $f$ is not found in the recording part, We maps the flow $f$ to the $k$ counters in $CBF_1$ using the $k$ independent hash functions $H_1(\cdot), \ldots, H_k(\cdot)$ and then increments these counters by 1.
 
-\textbf{The detection of potentially steady flows:} At the end of each time window, for each flow under detection, the filtering part queries its $k$ mapped counters in the three rotating counting bloom filters. The minimum mapped counter in each filter is then used as the estimated frequency of that flow in the corresponding time window. Since the filtering part uses three consecutive time windows for pre-verification ($L_f = 3$), there are two cases:
+\textbf{The detection of potentially steady flows:} After the flow $f$ is inserted into the filter, we query the $k$ mapped counters of the flow $f$ in the three counting bloom filters. Then we take the minimum mapped counter in each filter as the estimated frequency of the flow $f$ in the time window to determine whether the flow $f$ is a potentially steady flow. There are two cases:
 \begin{itemize}
-    \item \textbf{Case 1:} If the estimated frequencies of flow $f$ in $CBF_1$, $CBF_2$, and $CBF_3$ are all non-zero and satisfy the stability condition, flow $f$ is considered to have appeared continuously over three consecutive time windows and is inserted into the recording part as a potentially steady flow.
-    \item \textbf{Case 2:} If any of the estimated frequencies of flow $f$ in $CBF_1$, $CBF_2$, and $CBF_3$ is zero, or if these estimated frequencies do not satisfy the stability condition, flow $f$ is filtered out.
+    \item \textbf{Case 1:} If the estimated frequencies of the flow $f$ are all non-zero and satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we insert the flow $f$ into the recording part.
+    \item \textbf{Case 2:} If the estimated frequencies of flow $f$ do not satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we filter out the flow $f$. 
 \end{itemize}
 
-\textbf{Rolling updates:} At the end of each time window, the three counting bloom filters are logically rotated. The current filter $CBF_1$ becomes the new $CBF_2$, the previous filter $CBF_2$ becomes the new $CBF_3$, and the oldest filter $CBF_3$ is cleared and reused as the new $CBF_1$. 
+\textbf{Rolling updates:} At the end of each time window, we rotate the three counting bloom filters: the former $CBF_1$ and $CBF_2$ serve as $CBF_2$ and $CBF_3$, respectively, and $CBF_3$ is cleared and reused as $CBF_1$. 
 
 \textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filtering part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The detection of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
 
-1) To check $f_1$, we obtain its mapped counters in the three counting bloom filters by hashing and use the minimum mapped counter in each filter as the window frequency estimate. The estimated frequencies across three windows are 5, 4, and 5 respectively. All estimated frequencies are non-zero and satisfy the stability condition. Thus, $f_1$ is detected as a potentially steady flow and transferred to the recording part.
+1) For $f_1$, we obtain its mapped counters in the three counting bloom filters by hashing and use the minimum mapped counter in each filter as the window frequency estimate. The estimated frequencies across three windows are 5, 4, and 5 respectively. All estimated frequencies are non-zero and satisfy the stability condition. Thus, $f_1$ is detected as a potentially steady flow and transferred to the recording part.
 
-2) To check $f_2$, we find that $CBF_3[H_1(f_2)] = 0$. Therefore, the minimum estimated frequency of $f_2$ in the oldest window is 0, indicating that $f_2$ did not appear continuously across three windows. Thus, $f_2$ is filtered out as a non-continuous flow.
+2) For $f_2$, we find that $CBF_3[H_1(f_2)] = 0$. Therefore, the minimum estimated frequency of $f_2$ in the oldest window is 0, indicating that $f_2$ did not appear continuously across three windows. Thus, $f_2$ is filtered out as a non-continuous flow.
 
-3) To check $f_3$, the estimated frequencies across three windows are 3, 4, and 8 respectively. Although all estimated frequencies are non-zero, the frequency variation exceeds the tolerance threshold $\beta$. Thus, $f_3$ is filtered out as an unstable flow.
+3) For $f_3$, the estimated frequencies across three windows are 3, 4, and 8 respectively. Although all estimated frequencies are non-zero, the frequency variation exceeds the tolerance threshold $\beta$. Thus, $f_3$ is filtered out as an unstable flow.
 
 \subsection{Recording Part}
 
