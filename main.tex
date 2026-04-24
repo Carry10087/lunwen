@@ -130,27 +130,22 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
 
 \subsection{Filtering Part}
 
-\textbf{Data structure:} The filtering part comprises three counting bloom filters, $CBF_1$, $CBF_2$, and $CBF_3$, each containing $w$ counters in Figure \ref{fig:filter}. The three filters share a set of $k$ mutually independent hash functions, $H_1(\cdot), H_2(\cdot), ..., H_k(\cdot)$, which map each flow to $k$ counters in each filter. These counters store the cumulative packet arrival counts for mapped flows. Specifically, $CBF_1$, $CBF_2$, and $CBF_3$ estimate the frequency of a flow in the current, previous, and oldest of the three consecutive time windows, respectively. 
+\textbf{Data structure:} The filtering part is comprised of three counting bloom filters, $CBF_1$, $CBF_2$, and $CBF_3$, each containing $w$ counters in Figure \ref{fig:filter}. The three filters track packet arrivals across consecutive time windows. For this purpose, the three filters share a set of $k$ mutually independent hash functions, $H_1(\cdot), H_2(\cdot), \ldots, H_k(\cdot)$. These functions map each flow to $k$ counter positions in the current-window $CBF$, and the other two $CBF$s use the same positions for the same flow. Each counter records the cumulative packet arrival count of all flows hashed to that counter position. Specifically, $CBF_1$, $CBF_2$, and $CBF_3$ are used to estimate the frequency of a flow in the current, previous, and oldest of the three consecutive time windows, respectively.
+ 
 
 \begin{figure}[htbp]
-\centerline{\includegraphics[width=0.8\textwidth, trim=10 10 10 10, clip]{Non-continuous flow filtering structure.pdf}}
-\caption{Non-continuous flow filtering structure.}
+\centerline{\includegraphics[width=1\textwidth, trim=10 10 10 10, clip]{Non-continuous flow filtering structure.pdf}}
+\caption{The filtering part of non-continuous flows.}
 \label{fig:filter}
 \end{figure}
 
 \textbf{Initialization:} Initially, we set all counters in $CBF_1$, $CBF_2$, and $CBF_3$ to zero.
 
-\textbf{Packet processing:} For the arrived packet from the flow $f$, we first look up the flow $f$ in the recording part. If the flow $f$ is not found in the recording part, We maps the flow $f$ to the $k$ counters in $CBF_1$ using the $k$ independent hash functions $H_1(\cdot), \ldots, H_k(\cdot)$ and increment these counters by 1.
+\textbf{Packet processing:} For an arrived packet in the flow $f$, we first look up the recording part. If the lookup fails, we map the packet to $k$ counters in the $CBF_1$ by $k$ hash functions $H_1(\cdot), \ldots, H_k(\cdot)$ and increment the minimum mapped counter by 1. Then we query the counters at the k positions mapped from the flow $f$ in each of the three counting bloom filters. Then we take the minimum mapped counter in each filter as the estimated frequency of the flow $f$ in the time window to determine whether the flow $f$ is a potentially steady flow. If the estimated frequencies of the flow $f$ are all non-zero and satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we insert flow $f$ into the recording part.
 
-\textbf{The detection of potentially steady flows:} After the flow $f$ is inserted into the filter, we query the $k$ mapped counters of the flow $f$ in the three counting bloom filters. Then we take the minimum mapped counter in each filter as the estimated frequency of the flow $f$ in the time window to determine whether the flow $f$ is a potentially steady flow. There are two cases:
-\begin{itemize}
-    \item \textbf{Case 1:} If the estimated frequencies of the flow $f$ are all non-zero and satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we insert the flow $f$ into the recording part.
-    \item \textbf{Case 2:} If the estimated frequencies of flow $f$ do not satisfy the stability condition defined in Eq.~(\ref{eq:stability}), we filter out the flow $f$. 
-\end{itemize}
+\textbf{Rolling updates:} At the end of each time window, we clear out counters of the oldest-window filter to record packet arrivals in new window. 
 
-\textbf{Rolling updates:} At the end of each time window, we rotate the three counting bloom filters: the former $CBF_1$ and $CBF_2$ serve as $CBF_2$ and $CBF_3$, respectively, the $CBF_3$ is cleared and reused as $CBF_1$. 
-
-\textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filtering part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$, and the current time window is $W_3$. The detection of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
+\textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filtering part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$. The detection of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
 
 1) For $f_1$, we obtain its mapped counters in the three counting bloom filters by hashing and use the minimum mapped counter in each filter as the window frequency estimate. The estimated frequencies across three windows are 5, 4, and 5 respectively. All estimated frequencies are non-zero and satisfy the stability condition. Thus, $f_1$ is detected as a potentially steady flow and transferred to the recording part.
 
