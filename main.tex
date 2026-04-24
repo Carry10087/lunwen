@@ -147,11 +147,11 @@ For each arrived packet in the flow $f$, we first look up the recording part. If
 
 \textbf{A running example:} Figure \ref{fig:filter} illustrates a running example of the filtering part. Assume that the number of hash functions $k = 3$, the fluctuation tolerance $\beta = 0.2$. The detection of $f_1$, $f_2$, and $f_3$ at the end of the time window can be described as follows.
 
-1) For $f_1$, we obtain its mapped counters in the three counting bloom filters by hashing and use the minimum mapped counter in each filter as the window frequency estimate. The estimated frequencies across three windows are 5, 4, and 5 respectively. All estimated frequencies are non-zero and satisfy the stability condition. Thus, $f_1$ is detected as a potentially steady flow and transferred to the recording part.
+1) For $f_1$, we obtain its mapped counters in the three counting bloom filters by hashing and use the minimum mapped counter in each filter as the window frequency estimate. The mapped counters in the three filters are $(27, 25, 26)$, $(24, 26, 25)$, and $(28, 26, 27)$, respectively. Therefore, the estimated frequencies across the three windows are $25$, $24$, and $26$. All estimated frequencies are non-zero and satisfy the stability condition. Thus, $f_1$ is detected as a potentially steady flow and transferred to the recording part.
 
-2) For $f_2$, we find that $CBF_3[H_1(f_2)] = 0$. Therefore, the minimum estimated frequency of $f_2$ in the oldest window is 0, indicating that $f_2$ did not appear continuously across three windows. Thus, $f_2$ is filtered out as a non-continuous flow.
+2) For $f_2$, the mapped counters in the three filters are $(21, 19, 20)$, $(18, 20, 19)$, and $(0, 17, 18)$, respectively. Therefore, the estimated frequencies across the three windows are $19$, $18$, and $0$. Since the estimated frequency in the oldest window is $0$, $f_2$ did not appear continuously across the three windows. Thus, $f_2$ is filtered out as a non-continuous flow.
 
-3) For $f_3$, the estimated frequencies across three windows are 3, 4, and 8 respectively. Although all estimated frequencies are non-zero, the frequency variation exceeds the tolerance threshold $\beta$. Thus, $f_3$ is filtered out as an unstable flow.
+3) For $f_3$, the mapped counters in the three filters are $(18, 16, 17)$, $(23, 22, 24)$, and $(31, 29, 30)$, respectively. Therefore, the estimated frequencies across the three windows are $16$, $22$, and $29$. Although all estimated frequencies are non-zero, the frequency variation exceeds the fluctuation tolerance threshold $\beta$. Thus, $f_3$ is filtered out as an unstable flow.
 
 \subsection{Recording Part}
 
